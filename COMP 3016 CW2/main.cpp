@@ -11,7 +11,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-// -------------------- Camera state --------------------
+//  Camera state 
 glm::vec3 gCamPos(0.0f, 6.0f, 14.0f);
 glm::vec3 gCamFront(0.0f, 0.0f, -1.0f);
 glm::vec3 gCamUp(0.0f, 1.0f, 0.0f);
@@ -59,14 +59,14 @@ static void framebuffer_size_callback(GLFWwindow* window, int width, int height)
     glViewport(0, 0, width, height);
 }
 
-// -------------------- Vertex struct --------------------
+//  Vertex struct 
 struct Vertex
 {
     glm::vec3 pos;
     glm::vec3 normal;
 };
 
-// -------------------- Noise helpers (no extra libs) --------------------
+//  Noise helpers (no extra libs) 
 static float hash2D(int x, int z, int seed)
 {
     int h = x * 374761393 + z * 668265263 + seed * 1442695041;
@@ -169,7 +169,7 @@ int main()
     // 5) Load shader
     Shader shader("shaders/basic.vert", "shaders/basic.frag");
 
-    // -------------------- Generate island terrain --------------------
+    //  Generate island terrain 
     const int gridSize = 200;     // quads per side
     const float spacing = 0.2f;   // distance between vertices
     const float half = (gridSize * spacing) * 0.5f;
@@ -238,7 +238,7 @@ int main()
         }
     }
 
-    // -------------------- Recompute normals --------------------
+    //  Recompute normals 
     for (auto& v : verts)
         v.normal = glm::vec3(0.0f);
 
@@ -265,7 +265,7 @@ int main()
     for (auto& v : verts)
         v.normal = glm::normalize(v.normal);
 
-    // -------------------- Upload terrain to GPU --------------------
+    //  Upload terrain to GPU 
     GLuint VAO = 0, VBO = 0, EBO = 0;
 
     glGenVertexArrays(1, &VAO);
@@ -288,7 +288,7 @@ int main()
 
     glBindVertexArray(0);
 
-    // -------------------- Main loop --------------------
+    //  Main loop 
     float lastFrame = 0.0f;
 
     while (!glfwWindowShouldClose(window))
