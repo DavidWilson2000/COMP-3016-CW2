@@ -8,6 +8,8 @@ class Shader
 {
 public:
     GLuint ID;
+    void SetVec3(const std::string& name, float x, float y, float z) const;
+    void SetFloat(const std::string& name, float v) const;
 
     Shader(const std::string& vertexPath, const std::string& fragmentPath);
     ~Shader();
