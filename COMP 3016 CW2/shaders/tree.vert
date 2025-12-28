@@ -1,28 +1,34 @@
 #version 410 core
-layout(location=0) in vec3 aPos;
-layout(location=1) in vec3 aNormal;
 
-// instance matrix (mat4 = 4 vec4 attributes)
-layout(location=2) in vec4 iM0;
-layout(location=3) in vec4 iM1;
-layout(location=4) in vec4 iM2;
-layout(location=5) in vec4 iM3;
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aNormal;
+
+// Instance matrix occupies locations 2..5
+layout(location = 2) in mat4 iModel;
 
 uniform mat4 uView;
 uniform mat4 uProj;
+uniform float uTime;
 
-out vec3 vWorldPos;
-out vec3 vNormal;
+out VS_OUT {
+    vec3 worldPos;
+    vec3 normal;
+} vs_out;
 
 void main()
 {
-    mat4 instanceModel = mat4(iM0, iM1, iM2, iM3);
+    vec3 pos = aPos;
 
-    vec4 worldPos = instanceModel * vec4(aPos, 1.0);
-    vWorldPos = worldPos.xyz;
+    // Small wind sway: only affect higher vertices (foliage area)
+    float swayMask = smoothstep(0.8, 2.8, pos.y);
+    pos.x += sin(uTime * 1.6 + pos.y * 2.0) * 0.03 * swayMask;
+    pos.z += cos(uTime * 1.3 + pos.y * 1.7) * 0.03 * swayMask;
 
-    mat3 normalMat = mat3(transpose(inverse(instanceModel)));
-    vNormal = normalize(normalMat * aNormal);
+    vec4 wp = iModel * vec4(pos, 1.0);
 
-    gl_Position = uProj * uView * worldPos;
+    mat3 nMat = transpose(inverse(mat3(iModel)));
+    vs_out.normal = normalize(nMat * aNormal);
+    vs_out.worldPos = wp.xyz;
+
+    gl_Position = uProj * uView * wp;
 }

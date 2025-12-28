@@ -1,5 +1,5 @@
 #pragma once
-#pragma once
+
 
 #include <string>
 #include <GL/glew.h>
@@ -7,7 +7,8 @@
 class Shader
 {
 public:
-    GLuint ID;
+    GLuint ID = 0;
+    bool linkedOk = false;  
     void SetVec3(const std::string& name, float x, float y, float z) const;
     void SetFloat(const std::string& name, float v) const;
 
