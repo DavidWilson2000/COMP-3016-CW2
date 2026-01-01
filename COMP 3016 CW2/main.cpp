@@ -26,7 +26,7 @@
 #include <glm/glm/gtc/type_ptr.hpp>
 #include <glm/glm/gtc/constants.hpp>
 
-#include <irrKlang.h>
+#include <irrKlang/irrKlang.h>
 #pragma comment(lib, "irrKlang.lib")
 using namespace irrklang;
 
