@@ -4,24 +4,30 @@
 #include <random>
 #include <memory>
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <unordered_map>
+#include <string>
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
 #include "Shader.h"
 
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
-#include <glm/gtc/constants.hpp>
+#include <glm/glm/gtc/matrix_transform.hpp>
+#include <glm/glm/gtc/type_ptr.hpp>
+#include <glm/glm/gtc/constants.hpp>
+
+
 
 struct WorldConfig
 {
     float oceanHalfSize = 600.0f;
 
     int islandCount = 7;
-    float islandSpawnRadius = 420.0f; 
-    float islandMinSpacing = 160.0f;    
+    float islandSpawnRadius = 420.0f;
+    float islandMinSpacing = 160.0f;
 
     // Terrain
     int terrainGrid = 250;
@@ -30,8 +36,8 @@ struct WorldConfig
 
     // Water
     float waterSpacing = 1.0f;
-    float waveStrength = 1.2f;   // controls vertical amplitude in shader
-    float waveSpeed = 1.0f;       // controls time scaling in shader
+    float waveStrength = 1.2f;
+    float waveSpeed = 1.0f;
 
     // Rendering / atmosphere
     bool fogEnabled = true;
@@ -48,8 +54,21 @@ struct WorldConfig
     bool stormMode = false;
     float stormFogMultiplier = 2.5f;
     float stormWaveMultiplier = 1.8f;
-};
 
+    // Lighthouse placement / lighting
+    float lighthouseChancePerIsland = 0.55f; // 0..1
+    float lighthouseScale = 2.70f;
+    float lighthouseLanternHeight = 10.0f;  
+    float lighthouseLightStrength = 25.0f;    // brightness multiplier at full night
+
+    // Lighthouse beam tuning
+    float lighthouseBeamSpinSpeed = 0.35f;  // radians/sec
+    float lighthouseBeamLength = 40.0f;  // used as a scale multiplier 
+    float lighthouseBeamRadius = 6.0f;  // used as a scale multiplier 
+    float lighthouseBeamStrength = 6.5f;  // brightness of the visible cone
+
+
+};
 
 enum class IslandBiome : int
 {
@@ -71,19 +90,14 @@ static const char* IslandBiomeName(IslandBiome b)
     }
 }
 
+
+
 struct Vertex
 {
     glm::vec3 pos;
     glm::vec3 normal;
-    float moisture = 0.0f; // supports biomes 
+    float moisture = 0.0f;
 };
-
-struct TreeVertex
-{
-    glm::vec3 pos;
-    glm::vec3 normal;
-};
-
 
 struct GLMesh
 {
@@ -115,7 +129,6 @@ struct KeyLatch
 };
 
 
-// Camera and controls 
 
 class Camera
 {
@@ -127,7 +140,6 @@ public:
     float yaw = -90.0f;
     float pitch = -20.0f;
 
-    // takes a speed multiplier
     void ProcessKeyboard(GLFWwindow* window, float dt, float speedMul)
     {
         float speed = 10.0f * dt * speedMul;
@@ -178,8 +190,7 @@ private:
     bool firstMouse = true;
 };
 
-// Day/Night system
- 
+//  Day and night cycle
 static glm::vec3 SunColor(float t)
 {
     glm::vec3 night(0.10f, 0.10f, 0.30f);
@@ -216,9 +227,18 @@ struct TimeOfDaySystem
     }
 };
 
- 
-// Noise helpers (value noise + fbm)
- 
+// Smooth night factor: 0 in day, 1 at full night
+static float NightFactor(float t01)
+{
+    // fade in around sunset (0.78->0.88), fade out around sunrise (0.12->0.22)
+    float dusk = glm::smoothstep(0.78f, 0.88f, t01);
+    float dawn = 1.0f - glm::smoothstep(0.12f, 0.22f, t01);
+    float nf = dusk * dawn;
+    return glm::clamp(nf, 0.0f, 1.0f);
+}
+
+//  NOISE 
+
 static float hash2D(int x, int z, int seed)
 {
     int h = x * 374761393 + z * 668265263 + seed * 1442695041;
@@ -263,15 +283,35 @@ static float fbm(float x, float z, int seed, int octaves = 6, float lacunarity =
     return sum;
 }
 
-static float Dist2XZ(const glm::vec3& a, const glm::vec3& b)
+// Hard coded tree pallet
+
+static GLuint CreateTreePaletteTexture_3x3()
 {
-    float dx = a.x - b.x;
-    float dz = a.z - b.z;
-    return dx * dx + dz * dz;
+    static const unsigned char TREE_PALETTE_RGBA[3 * 3 * 4] =
+    {
+      
+        36,138,41,255,   1,2,1,255,     0,0,0,255,
+     
+        0,0,0,255,       0,0,0,255,     0,0,0,255,
+     
+        86,53,4,255,     1,0,0,255,     0,0,0,255
+    };
+
+    GLuint tex = 0;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 3, 3, 0, GL_RGBA, GL_UNSIGNED_BYTE, TREE_PALETTE_RGBA);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return tex;
 }
 
-
-// Terrain (PCG island, normals, moisture attribute, maxHeight)
+//  Terrain 
 
 class Terrain
 {
@@ -279,11 +319,12 @@ public:
     float seaLevel = 2.5f;
     float globalVerticalMul = 3.0f;
 
+    float HalfSize() const { return gridSize * spacing * 0.5f; }
+
     const std::vector<Vertex>& Verts() const { return verts; }
     float MaxHeight() const { return maxHeight; }
     float Spacing() const { return spacing; }
 
-    // sampling helpers for gameplay systems (slope, biome)
     glm::vec3 SampleNormalAtWorldXZ(float worldX, float worldZ) const
     {
         int idx = SampleIndex(worldX, worldZ);
@@ -292,8 +333,46 @@ public:
 
     float SampleHeightAtWorldXZ(float worldX, float worldZ) const
     {
-        int idx = SampleIndex(worldX, worldZ);
-        return verts[idx].pos.y;
+        float half = gridSize * spacing * 0.5f;
+
+        float gx = (worldX + half) / spacing;
+        float gz = (worldZ + half) / spacing;
+
+        gx = glm::clamp(gx, 0.0f, (float)gridSize - 0.0001f);
+        gz = glm::clamp(gz, 0.0f, (float)gridSize - 0.0001f);
+
+        int x0 = (int)floor(gx);
+        int z0 = (int)floor(gz);
+
+        float tx = gx - x0;
+        float tz = gz - z0;
+
+        int row0 = z0 * (gridSize + 1);
+        int row1 = (z0 + 1) * (gridSize + 1);
+
+        const Vertex& v00 = verts[row0 + x0];
+        const Vertex& v10 = verts[row0 + (x0 + 1)];
+        const Vertex& v01 = verts[row1 + x0];
+        const Vertex& v11 = verts[row1 + (x0 + 1)];
+
+        float h = 0.0f;
+
+        if (tx + tz <= 1.0f)
+        {
+            float w00 = 1.0f - tx - tz;
+            float w01 = tz;
+            float w10 = tx;
+            h = w00 * v00.pos.y + w01 * v01.pos.y + w10 * v10.pos.y;
+        }
+        else
+        {
+            float w11 = tx + tz - 1.0f;
+            float w10 = 1.0f - tz;
+            float w01 = 1.0f - tx;
+            h = w10 * v10.pos.y + w01 * v01.pos.y + w11 * v11.pos.y;
+        }
+
+        return h;
     }
 
     float SampleMoistureAtWorldXZ(float worldX, float worldZ) const
@@ -302,7 +381,6 @@ public:
         return verts[idx].moisture;
     }
 
-  
     void Build(int gridSize, float spacing, int seed, IslandBiome islandBiome)
     {
         this->gridSize = gridSize;
@@ -320,7 +398,6 @@ public:
         maxHeight = -1e9f;
 
         float globalHeightScale = 0.65f;
-        // Biome tuning knobs 
         float heightMul = 1.0f;
         float ridgeMul = 1.0f;
         float moistureMul = 1.0f;
@@ -355,20 +432,14 @@ public:
                 float wx = x * spacing - half;
                 float wz = z * spacing - half;
 
-               float dist = sqrt(wx * wx + wz * wz);
+                float ax = fabs(wx);
+                float az = fabs(wz);
 
-             
-               float ax = fabs(wx);
-               float az = fabs(wz);
+                float t = glm::clamp(glm::max(ax, az) / half, 0.0f, 1.0f);
 
-               // 0 at center, 1 at square edge
-               float t = glm::clamp(glm::max(ax, az) / half, 0.0f, 1.0f);
+                float mask = 1.0f - glm::smoothstep(0.0f, 1.0f, t);
+                mask = pow(mask, 0.2f);
 
-               //  Handles Falloff and slope from middle
-               float mask = 1.0f - glm::smoothstep(0.0f, 1.0f, t);
-               mask = pow(mask, 0.2f);   // 2.5 to 4.0
-
-                //  Noise 
                 float nBig = fbm(wx * 0.012f, wz * 0.012f, seed + 1000) * 2.0f - 1.0f;
                 float nMid = fbm(wx * 0.045f, wz * 0.045f, seed + 2000) * 2.0f - 1.0f;
                 float nSmall = fbm(wx * 0.160f, wz * 0.160f, seed + 3000) * 2.0f - 1.0f;
@@ -383,24 +454,17 @@ public:
                     (nSmall * 0.9f * heightMul);
 
                 height *= globalHeightScale * globalVerticalMul;
-
-                // Lift the center a bit
                 height += (4.2f + baseLift) * mask * globalVerticalMul;
 
-
-                //  Apply mask so edges return to sea level
                 float land = seaLevel + (height - seaLevel) * mask;
 
-                //  Coast flatten / beach zone 
-                float coastStart = 0.05f; 
+                float coastStart = 0.05f;
                 float coast = glm::smoothstep(coastStart, 1.0f, t);
                 land = glm::mix(land, seaLevel, coast);
 
-               
-                float rim = glm::smoothstep(0.88f, 1.0f, t); 
+                float rim = glm::smoothstep(0.88f, 1.0f, t);
                 land = glm::mix(land, seaLevel, rim);
 
-                // Moisture
                 float m = fbm(wx * 0.035f, wz * 0.035f, seed + 7777);
                 float altitude01 = glm::clamp((land - seaLevel) / 10.0f, 0.0f, 1.0f);
                 m = glm::mix(m, m * 0.6f, altitude01);
@@ -418,7 +482,6 @@ public:
             }
         }
 
-        // Indices
         for (int z = 0; z < gridSize; z++)
         {
             for (int x = 0; x < gridSize; x++)
@@ -440,7 +503,6 @@ public:
         Upload();
     }
 
-   
     void Draw(Shader& shader,
         const glm::mat4& model,
         const glm::mat4& view,
@@ -452,7 +514,14 @@ public:
         const glm::vec3& fogColor,
         float fogDensity,
         float islandBiomeId,
-        float islandSeed)
+        float islandSeed,
+       
+        const glm::vec3& lhPosWS,
+        const glm::vec3& lhCol,
+        float lhIntensity,
+        const glm::vec3& beamDirWS,
+        float beamInnerCos,
+        float beamOuterCos)
     {
         shader.Use();
         shader.SetMat4("uModel", glm::value_ptr(model));
@@ -473,9 +542,17 @@ public:
         shader.SetVec3("uFogColor", fogColor.x, fogColor.y, fogColor.z);
         shader.SetFloat("uFogDensity", fogDensity);
 
-    
         shader.SetFloat("uIslandBiome", islandBiomeId);
-        shader.SetFloat("uIslandSeed", islandSeed); 
+        shader.SetFloat("uIslandSeed", islandSeed);
+
+        // lighthouse point light uniforms for terrain
+        shader.SetVec3("uPointLightPos", lhPosWS.x, lhPosWS.y, lhPosWS.z);
+        shader.SetVec3("uPointLightColor", lhCol.x, lhCol.y, lhCol.z);
+        shader.SetFloat("uPointLightIntensity", lhIntensity);
+        shader.SetVec3("uBeamDir", beamDirWS.x, beamDirWS.y, beamDirWS.z);
+        shader.SetFloat("uBeamInnerCos", beamInnerCos);
+        shader.SetFloat("uBeamOuterCos", beamOuterCos);
+
 
         mesh.Bind();
         glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, 0);
@@ -516,10 +593,9 @@ private:
 
     int SampleIndex(float worldX, float worldZ) const
     {
-        // Convert world XZ -> grid coords
         float half = gridSize * spacing * 0.5f;
-        int gx = (int)round((worldX + half) / spacing);
-        int gz = (int)round((worldZ + half) / spacing);
+        int gx = (int)floor((worldX + half) / spacing);
+        int gz = (int)floor((worldZ + half) / spacing);
 
         gx = glm::clamp(gx, 0, gridSize);
         gz = glm::clamp(gz, 0, gridSize);
@@ -543,7 +619,6 @@ private:
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.ebo);
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
 
-      
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, pos));
         glEnableVertexAttribArray(0);
 
@@ -559,6 +634,8 @@ private:
     }
 };
 
+// Water
+
 class Water
 {
 public:
@@ -572,7 +649,6 @@ public:
 
     void Build(int grid, float spacing)
     {
-
         std::vector<Vertex> verts;
         std::vector<unsigned int> idx;
         float half = grid * spacing * 0.5f;
@@ -616,7 +692,14 @@ public:
         float waveSpeed,
         bool fogEnabled,
         const glm::vec3& fogColor,
-        float fogDensity)
+        float fogDensity,
+        const glm::vec3& lhPosWS,
+        const glm::vec3& lhCol,
+        float lhIntensity,
+        const glm::vec3& beamDirWS,
+        float beamInnerCos,
+        float beamOuterCos)
+
     {
         shader.Use();
         shader.SetMat4("uModel", glm::value_ptr(model));
@@ -637,7 +720,16 @@ public:
 
         shader.SetFloat("uFogEnabled", fogEnabled ? 1.0f : 0.0f);
         shader.SetVec3("uFogColor", fogColor.x, fogColor.y, fogColor.z);
-        shader.SetFloat("uFogDensity", fogDensity);
+        shader.SetFloat("uFogDensity", fogDensity); 
+
+       
+        shader.SetVec3("uPointLightPos", lhPosWS.x, lhPosWS.y, lhPosWS.z);
+        shader.SetVec3("uPointLightColor", lhCol.x, lhCol.y, lhCol.z);
+        shader.SetFloat("uPointLightIntensity", lhIntensity);
+        shader.SetVec3("uBeamDir", beamDirWS.x, beamDirWS.y, beamDirWS.z);
+        shader.SetFloat("uBeamInnerCos", beamInnerCos);
+        shader.SetFloat("uBeamOuterCos", beamOuterCos);
+
 
         mesh.Bind();
         glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, 0);
@@ -679,6 +771,8 @@ private:
         mesh.indexCount = (GLsizei)idx.size();
     }
 };
+
+// Skybox
 
 class Skybox
 {
@@ -739,125 +833,239 @@ private:
     GLuint vao = 0, vbo = 0;
 };
 
-static void BuildTreeMesh(std::vector<TreeVertex>& outVerts, std::vector<unsigned int>& outIdx)
+//  OBJ Model
+
+struct ModelVertex
 {
+    glm::vec3 pos;
+    glm::vec3 normal;
+    glm::vec2 uv;
+};
+
+static bool LoadOBJ_Minimal(const std::string& path,
+    std::vector<ModelVertex>& outVerts,
+    std::vector<unsigned int>& outIdx)
+{
+    std::ifstream in(path);
+    if (!in.is_open())
+    {
+        std::cerr << "Failed to open OBJ: " << path << "\n";
+        return false;
+    }
+
+    std::vector<glm::vec3> positions;
+    std::vector<glm::vec3> normals;
+    std::vector<glm::vec2> uvs;
+
+    struct Key { int v, vt, vn; };
+    struct KeyHash {
+        size_t operator()(Key const& k) const {
+            return (size_t)k.v * 73856093u ^ (size_t)k.vt * 19349663u ^ (size_t)k.vn * 83492791u;
+        }
+    };
+    struct KeyEq {
+        bool operator()(Key const& a, Key const& b) const {
+            return a.v == b.v && a.vt == b.vt && a.vn == b.vn;
+        }
+    };
+
+    std::unordered_map<Key, unsigned int, KeyHash, KeyEq> remap;
+
     outVerts.clear();
     outIdx.clear();
 
-    const int sides = 10;
-    const float trunkH = 1.2f;
-    const float trunkR = 0.12f;
-
-    const float coneH = 1.8f;
-    const float coneR = 0.7f;
-
-    int baseStart = (int)outVerts.size();
-    for (int i = 0; i < sides; i++)
+    std::string line;
+    while (std::getline(in, line))
     {
-        float a = (float)i / (float)sides * glm::two_pi<float>();
-        float x = cos(a) * trunkR;
-        float z = sin(a) * trunkR;
-        glm::vec3 n = glm::normalize(glm::vec3(x, 0.0f, z));
+        if (line.size() < 2) continue;
 
-        outVerts.push_back({ glm::vec3(x, 0.0f, z), n });
-        outVerts.push_back({ glm::vec3(x, trunkH, z), n });
+        std::istringstream ss(line);
+        std::string type;
+        ss >> type;
+
+        if (type == "v")
+        {
+            glm::vec3 p;
+            ss >> p.x >> p.y >> p.z;
+            positions.push_back(p);
+        }
+        else if (type == "vn")
+        {
+            glm::vec3 n;
+            ss >> n.x >> n.y >> n.z;
+            normals.push_back(glm::normalize(n));
+        }
+        else if (type == "vt")
+        {
+            glm::vec2 t;
+            ss >> t.x >> t.y;
+            t.y = 1.0f - t.y;
+            uvs.push_back(t);
+        }
+        else if (type == "f")
+        {
+            std::vector<Key> face;
+            face.reserve(4);
+
+            for (int i = 0; i < 4; i++)
+            {
+                std::string vtx;
+                if (!(ss >> vtx)) break;
+
+                int v = 0, vt = 0, vn = 0;
+
+                size_t p1 = vtx.find('/');
+                size_t p2 = (p1 == std::string::npos) ? std::string::npos : vtx.find('/', p1 + 1);
+
+                if (p1 == std::string::npos)
+                {
+                    v = std::stoi(vtx);
+                }
+                else
+                {
+                    v = std::stoi(vtx.substr(0, p1));
+                    if (p2 == std::string::npos)
+                    {
+                        std::string sVT = vtx.substr(p1 + 1);
+                        if (!sVT.empty()) vt = std::stoi(sVT);
+                    }
+                    else
+                    {
+                        std::string sVT = vtx.substr(p1 + 1, p2 - (p1 + 1));
+                        std::string sVN = vtx.substr(p2 + 1);
+                        if (!sVT.empty()) vt = std::stoi(sVT);
+                        if (!sVN.empty()) vn = std::stoi(sVN);
+                    }
+                }
+
+                Key k;
+                k.v = v - 1;
+                k.vt = (vt != 0) ? (vt - 1) : -1;
+                k.vn = (vn != 0) ? (vn - 1) : -1;
+                face.push_back(k);
+            }
+
+            auto emit = [&](const Key& k) -> unsigned int
+                {
+                    auto it = remap.find(k);
+                    if (it != remap.end()) return it->second;
+
+                    ModelVertex mv{};
+                    mv.pos = positions.at(k.v);
+                    mv.normal = (k.vn >= 0 && k.vn < (int)normals.size()) ? normals.at(k.vn) : glm::vec3(0, 1, 0);
+                    mv.uv = (k.vt >= 0 && k.vt < (int)uvs.size()) ? uvs.at(k.vt) : glm::vec2(0, 0);
+
+                    unsigned int idx = (unsigned int)outVerts.size();
+                    outVerts.push_back(mv);
+                    remap.insert({ k, idx });
+                    return idx;
+                };
+
+            if (face.size() == 3)
+            {
+                outIdx.push_back(emit(face[0]));
+                outIdx.push_back(emit(face[1]));
+                outIdx.push_back(emit(face[2]));
+            }
+            else if (face.size() == 4)
+            {
+                unsigned int i0 = emit(face[0]);
+                unsigned int i1 = emit(face[1]);
+                unsigned int i2 = emit(face[2]);
+                unsigned int i3 = emit(face[3]);
+
+                outIdx.push_back(i0); outIdx.push_back(i1); outIdx.push_back(i2);
+                outIdx.push_back(i0); outIdx.push_back(i2); outIdx.push_back(i3);
+            }
+        }
     }
 
-    for (int i = 0; i < sides; i++)
-    {
-        int i0 = baseStart + i * 2;
-        int i1 = baseStart + i * 2 + 1;
-        int i2 = baseStart + ((i + 1) % sides) * 2;
-        int i3 = baseStart + ((i + 1) % sides) * 2 + 1;
-
-        outIdx.push_back((unsigned int)i0);
-        outIdx.push_back((unsigned int)i2);
-        outIdx.push_back((unsigned int)i1);
-
-        outIdx.push_back((unsigned int)i1);
-        outIdx.push_back((unsigned int)i2);
-        outIdx.push_back((unsigned int)i3);
-    }
-
-    int coneBaseStart = (int)outVerts.size();
-    for (int i = 0; i < sides; i++)
-    {
-        float a = (float)i / (float)sides * glm::two_pi<float>();
-        float x = cos(a) * coneR;
-        float z = sin(a) * coneR;
-
-        glm::vec3 sideN = glm::normalize(glm::vec3(x, coneR / coneH, z));
-        outVerts.push_back({ glm::vec3(x, trunkH, z), sideN });
-    }
-
-    int tipIndex = (int)outVerts.size();
-    outVerts.push_back({ glm::vec3(0.0f, trunkH + coneH, 0.0f), glm::vec3(0,1,0) });
-
-    for (int i = 0; i < sides; i++)
-    {
-        int i0 = coneBaseStart + i;
-        int i1 = coneBaseStart + ((i + 1) % sides);
-        outIdx.push_back((unsigned int)i0);
-        outIdx.push_back((unsigned int)i1);
-        outIdx.push_back((unsigned int)tipIndex);
-    }
+    std::cout << "Loaded OBJ: " << path << " verts=" << outVerts.size() << " idx=" << outIdx.size() << "\n";
+    return !outVerts.empty() && !outIdx.empty();
 }
+
+struct GLModel
+{
+    GLMesh mesh;
+
+    void Destroy() { mesh.Destroy(); }
+
+    void Upload(const std::vector<ModelVertex>& verts, const std::vector<unsigned int>& idx)
+    {
+        mesh.Destroy();
+
+        glGenVertexArrays(1, &mesh.vao);
+        glGenBuffers(1, &mesh.vbo);
+        glGenBuffers(1, &mesh.ebo);
+
+        glBindVertexArray(mesh.vao);
+
+        glBindBuffer(GL_ARRAY_BUFFER, mesh.vbo);
+        glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(ModelVertex), verts.data(), GL_STATIC_DRAW);
+
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.ebo);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx.size() * sizeof(unsigned int), idx.data(), GL_STATIC_DRAW);
+
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(ModelVertex), (void*)offsetof(ModelVertex, pos));
+        glEnableVertexAttribArray(0);
+
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(ModelVertex), (void*)offsetof(ModelVertex, normal));
+        glEnableVertexAttribArray(1);
+
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(ModelVertex), (void*)offsetof(ModelVertex, uv));
+        glEnableVertexAttribArray(2);
+
+        glBindVertexArray(0);
+
+        mesh.indexCount = (GLsizei)idx.size();
+        mesh.indexType = GL_UNSIGNED_INT;
+    }
+};
+
+//  Tree System 
 
 class TreeSystem
 {
 public:
-    void BuildMesh()
+    void InitForMesh(const GLMesh& mesh)
     {
-        Destroy();
-
-        BuildTreeMesh(treeVerts, treeIdx);
-
-        glGenVertexArrays(1, &vao);
-        glGenBuffers(1, &vbo);
-        glGenBuffers(1, &ebo);
-        glGenBuffers(1, &instanceVBO);
+        if (vao == 0) glGenVertexArrays(1, &vao);
+        if (instanceVBO == 0) glGenBuffers(1, &instanceVBO);
 
         glBindVertexArray(vao);
 
-        glBindBuffer(GL_ARRAY_BUFFER, vbo);
-        glBufferData(GL_ARRAY_BUFFER, treeVerts.size() * sizeof(TreeVertex), treeVerts.data(), GL_STATIC_DRAW);
+        glBindBuffer(GL_ARRAY_BUFFER, mesh.vbo);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.ebo);
 
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, treeIdx.size() * sizeof(unsigned int), treeIdx.data(), GL_STATIC_DRAW);
-
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(TreeVertex), (void*)offsetof(TreeVertex, pos));
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(TreeVertex), (void*)offsetof(TreeVertex, normal));
-        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(ModelVertex), (void*)offsetof(ModelVertex, pos));
 
-       
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(ModelVertex), (void*)offsetof(ModelVertex, normal));
+
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(ModelVertex), (void*)offsetof(ModelVertex, uv));
+
         glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
         glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
 
         std::size_t vec4Size = sizeof(glm::vec4);
 
-        glEnableVertexAttribArray(2);
-        glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(glm::mat4), (void*)(0));
-        glEnableVertexAttribArray(3);
-        glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(glm::mat4), (void*)(vec4Size));
-        glEnableVertexAttribArray(4);
-        glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, sizeof(glm::mat4), (void*)(2 * vec4Size));
-        glEnableVertexAttribArray(5);
-        glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(glm::mat4), (void*)(3 * vec4Size));
-
-        glVertexAttribDivisor(2, 1);
-        glVertexAttribDivisor(3, 1);
-        glVertexAttribDivisor(4, 1);
-        glVertexAttribDivisor(5, 1);
+        for (int i = 0; i < 4; i++)
+        {
+            glEnableVertexAttribArray(3 + i);
+            glVertexAttribPointer(3 + i, 4, GL_FLOAT, GL_FALSE, sizeof(glm::mat4), (void*)(i * vec4Size));
+            glVertexAttribDivisor(3 + i, 1);
+        }
 
         glBindVertexArray(0);
-
-        instances.clear();
     }
 
-    void PlaceOnTerrain(const Terrain& terrain, int seed, const glm::vec3& worldOffset)
+    void PlaceOnTerrain(const Terrain& terrain,
+        int seed,
+        const glm::vec3& worldOffset,
+        const glm::vec3& pivotMS)
     {
-
         instances.clear();
         instances.reserve(2500);
 
@@ -868,12 +1076,9 @@ public:
         std::uniform_int_distribution<int> pick(0, (int)verts.size() - 1);
 
         std::uniform_real_distribution<float> jitter(-spacing * 0.45f, spacing * 0.45f);
-        std::uniform_real_distribution<float> rot(0.0f, glm::two_pi<float>());
+        std::uniform_real_distribution<float> rotY(0.0f, glm::two_pi<float>());
         std::uniform_real_distribution<float> scaleR(0.8f, 1.5f);
         std::uniform_real_distribution<float> chance01(0.0f, 1.0f);
-
-        const float minSpacing = 0.7f;
-        const float minSpacing2 = minSpacing * minSpacing;
 
         const float slopeLimit = 0.80f;
         const float minMoisture = 0.45f;
@@ -881,131 +1086,95 @@ public:
         const int desiredTrees = 800;
         const int maxTries = desiredTrees * 8;
 
-        float cellSize = minSpacing;
-        int gridW = (int)std::ceil((terrain.Spacing() * terrain.Spacing() * 0.0f) + 1.0f);
-     
-        float half = (terrain.Spacing() * (float)( /* gridSize */ 1)) * 0.0f;
+        const float TREE_SHRINK = 0.30f;
 
         for (int tries = 0; tries < maxTries && (int)instances.size() < desiredTrees; tries++)
         {
             int idx = pick(rng);
 
-            const glm::vec3 p = verts[idx].pos;
-            const glm::vec3 n = verts[idx].normal;
-            const float m = verts[idx].moisture;
+            glm::vec3 local = verts[idx].pos;
 
-            if (p.y < minHeight) continue;
-            if (n.y < slopeLimit) continue;
-            if (m < minMoisture) continue;
+            local.x += jitter(rng);
+            local.z += jitter(rng);
 
-            float prob = glm::clamp((m - minMoisture) / (1.0f - minMoisture), 0.0f, 1.0f);
-            prob = prob * prob;
+            float half = terrain.HalfSize();
+
+            if (local.x < -half || local.x > half || local.z < -half || local.z > half)
+                continue;
+
+            local.y = terrain.SampleHeightAtWorldXZ(local.x, local.z);
+
+            glm::vec3 n2 = terrain.SampleNormalAtWorldXZ(local.x, local.z);
+            float m2 = terrain.SampleMoistureAtWorldXZ(local.x, local.z);
+
+            if (local.y < minHeight) continue;
+            if (n2.y < slopeLimit) continue;
+            if (m2 < minMoisture) continue;
+
+            float prob = glm::clamp((m2 - minMoisture) / (1.0f - minMoisture), 0.0f, 1.0f);
+            prob *= prob;
             if (chance01(rng) > prob) continue;
 
-            glm::vec3 candidate = p;
-            candidate.x += jitter(rng);
-            candidate.z += jitter(rng);
+            float s = scaleR(rng) * TREE_SHRINK;
+            float r = rotY(rng);
 
-            // Move trees into world space for forest
-            candidate += worldOffset;
+            glm::vec3 world = local + worldOffset;
 
-            bool ok = true;
-            for (const glm::mat4& M : instances)
-            {
-                glm::vec3 other = glm::vec3(M[3]);
-                if (Dist2XZ(candidate, other) < minSpacing2)
-                {
-                    ok = false;
-                    break;
-                }
-            }
-            if (!ok) continue;
+            glm::mat4 T = glm::translate(glm::mat4(1.0f), world);
+            glm::mat4 Rm = glm::rotate(glm::mat4(1.0f), r, glm::vec3(0, 1, 0));
+            glm::mat4 Sm = glm::scale(glm::mat4(1.0f), glm::vec3(s));
+            glm::mat4 P = glm::translate(glm::mat4(1.0f), -pivotMS);
 
-            float s = scaleR(rng);
-            float r = rot(rng);
-
-            glm::mat4 T = glm::translate(glm::mat4(1.0f), candidate);
-            glm::mat4 R = glm::rotate(glm::mat4(1.0f), r, glm::vec3(0, 1, 0));
-            glm::mat4 S = glm::scale(glm::mat4(1.0f), glm::vec3(s));
-
-            instances.push_back(T * R * S);
+            instances.push_back(T * Rm * Sm * P);
         }
 
-        UploadInstances();
         std::cout << "Trees placed: " << instances.size() << "\n";
     }
 
-    void ClearInstances()
-    {
-        instances.clear();
-        UploadInstances(); // ensure VBO updates to empty
-    }
-
-    void Draw(Shader& shader,
-        const glm::mat4& view,
-        const glm::mat4& proj,
-        const Camera& cam,
-        const glm::vec3& lightDir,
-        const glm::vec3& lightCol,
-        bool fogEnabled,
-        const glm::vec3& fogColor,
-        float fogDensity,
-        float timeSeconds) const
-    {
-        if (instances.empty()) return;
-
-        shader.Use();
-        shader.SetMat4("uView", glm::value_ptr(view));
-        shader.SetMat4("uProj", glm::value_ptr(proj));
-        shader.SetVec3("uViewPos", cam.pos.x, cam.pos.y, cam.pos.z);
-        shader.SetVec3("uLightDir", lightDir.x, lightDir.y, lightDir.z);
-        shader.SetVec3("uLightColor", lightCol.x, lightCol.y, lightCol.z);
-
-        shader.SetFloat("uAmbientStrength", 0.25f);
-        shader.SetFloat("uSpecStrength", 0.15f);
-        shader.SetFloat("uShininess", 16.0f);
-
-        shader.SetFloat("uFogEnabled", fogEnabled ? 1.0f : 0.0f);
-        shader.SetVec3("uFogColor", fogColor.x, fogColor.y, fogColor.z);
-        shader.SetFloat("uFogDensity", fogDensity);
-
-        // Wind sway
-        shader.SetFloat("uTime", timeSeconds);
-
-        glBindVertexArray(vao);
-        glDrawElementsInstanced(GL_TRIANGLES, (GLsizei)treeIdx.size(), GL_UNSIGNED_INT, 0, (GLsizei)instances.size());
-        glBindVertexArray(0);
-    }
-
-    void Destroy()
-    {
-        if (instanceVBO) glDeleteBuffers(1, &instanceVBO);
-        if (ebo) glDeleteBuffers(1, &ebo);
-        if (vbo) glDeleteBuffers(1, &vbo);
-        if (vao) glDeleteVertexArrays(1, &vao);
-        vao = vbo = ebo = instanceVBO = 0;
-        instances.clear();
-    }
-
-private:
-    GLuint vao = 0, vbo = 0, ebo = 0, instanceVBO = 0;
-    std::vector<TreeVertex> treeVerts;
-    std::vector<unsigned int> treeIdx;
-    std::vector<glm::mat4> instances;
-
     void UploadInstances()
     {
-        glBindVertexArray(vao);
+        if (instanceVBO == 0) return;
 
         glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
         glBufferData(GL_ARRAY_BUFFER,
             instances.size() * sizeof(glm::mat4),
             instances.empty() ? nullptr : instances.data(),
             GL_DYNAMIC_DRAW);
+    }
 
+    void DrawInstanced(GLsizei indexCount) const
+    {
+        if (instances.empty() || vao == 0) return;
+
+        glBindVertexArray(vao);
+        glDrawElementsInstanced(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, 0, (GLsizei)instances.size());
         glBindVertexArray(0);
     }
+
+    void ClearInstances()
+    {
+        instances.clear();
+        UploadInstances();
+    }
+
+    void Destroy()
+    {
+        instances.clear();
+
+        if (instanceVBO) glDeleteBuffers(1, &instanceVBO);
+        instanceVBO = 0;
+
+        if (vao) glDeleteVertexArrays(1, &vao);
+        vao = 0;
+    }
+
+private:
+    GLuint vao = 0;
+    GLuint instanceVBO = 0;
+    std::vector<glm::mat4> instances;
 };
+
+//  Island 
 
 struct Island
 {
@@ -1014,12 +1183,69 @@ struct Island
     glm::mat4 model = glm::mat4(1.0f);
     glm::vec2 centerXZ = glm::vec2(0.0f);
     int seed = 0;
+    IslandBiome biome = IslandBiome::Forest;
 
-    IslandBiome biome = IslandBiome::Forest; // NEW
+    // Lighthouse (one per island max)
+    bool hasLighthouse = false;
+    glm::vec3 lighthousePosWS{ 0.0f };
+    glm::mat4 lighthouseModel = glm::mat4(1.0f);
 };
+
+static void BuildConeModel(GLModel& out, float height, float radius, int sides)
+{
+    std::vector<ModelVertex> v;
+    std::vector<unsigned int> idx;
+
+    // tip at +Y, base at 0
+    ModelVertex tip{};
+    tip.pos = glm::vec3(0, height, 0);
+    tip.normal = glm::vec3(0, 1, 0);
+    tip.uv = glm::vec2(0, 0);
+    v.push_back(tip);
+
+    // base ring
+    for (int s = 0; s < sides; s++)
+    {
+        float a = (float)s / (float)sides * glm::two_pi<float>();
+        float x = cos(a) * radius;
+        float z = sin(a) * radius;
+
+        ModelVertex mv{};
+        mv.pos = glm::vec3(x, 0.0f, z);
+
+        // approximate normals pointing outwards
+        mv.normal = glm::normalize(glm::vec3(x, radius * 0.6f, z));
+        mv.uv = glm::vec2((float)s / (float)sides, 1.0f);
+        v.push_back(mv);
+    }
+
+    // side triangles
+    for (int s = 0; s < sides; s++)
+    {
+        int i0 = 0; // tip
+        int i1 = 1 + s;
+        int i2 = 1 + ((s + 1) % sides);
+        idx.push_back(i0);
+        idx.push_back(i1);
+        idx.push_back(i2);
+    }
+
+    out.Upload(v, idx);
+}
+
+
+// App
 
 class App
 {
+    float treeModelMinY = 0.0f;
+    float treeModelMaxY = 1.0f;
+    float treeTrunkMinY = 0.0f;
+    glm::vec3 treePivotMS = glm::vec3(0.0f);
+    int   waterLightIdx = -1;
+    float waterLightDist = 1e30f;
+
+
 public:
     bool Init()
     {
@@ -1044,12 +1270,10 @@ public:
         glfwMakeContextCurrent(window);
         glfwSwapInterval(1);
 
-        
         int fbw = 0, fbh = 0;
         glfwGetFramebufferSize(window, &fbw, &fbh);
         glViewport(0, 0, fbw, fbh);
 
-   
         width = fbw;
         height = fbh;
 
@@ -1058,11 +1282,7 @@ public:
         glfwSetFramebufferSizeCallback(window, [](GLFWwindow* win, int w, int h) {
             glViewport(0, 0, w, h);
             auto* self = (App*)glfwGetWindowUserPointer(win);
-            if (self)
-            {
-                self->width = w;
-                self->height = h;
-            }
+            if (self) { self->width = w; self->height = h; }
             });
 
         glfwSetCursorPosCallback(window, [](GLFWwindow* win, double xpos, double ypos) {
@@ -1084,19 +1304,110 @@ public:
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_LESS);
 
-        // Shaders
         terrainShader = std::make_unique<Shader>("shaders/basic.vert", "shaders/basic.frag");
         skyShader = std::make_unique<Shader>("shaders/sky.vert", "shaders/sky.frag");
         waterShader = std::make_unique<Shader>("shaders/water.vert", "shaders/water.frag");
         treeShader = std::make_unique<Shader>("shaders/tree.vert", "shaders/tree.frag");
+        lighthouseShader = std::make_unique<Shader>("shaders/lighthouse.vert", "shaders/lighthouse.frag");
+        beamShader = std::make_unique<Shader>("shaders/beam.vert", "shaders/beam.frag");
+        std::cout << "beamShader linkedOk=" << beamShader->linkedOk << " ID=" << beamShader->ID << "\n";
 
-        // Build static GPU meshes once
+
         sky.Build();
 
-        // Build world (terrain + tree placement can change)
-        RebuildWorld(cfg.seed);
+        treePaletteTex = CreateTreePaletteTexture_3x3();
+        if (!treePaletteTex)
+            std::cerr << "Tree palette texture failed to create.\n";
 
-        // Sync time speed from config
+        std::cout << "CWD = " << std::filesystem::current_path() << "\n";
+
+        //  Load tree OBJ + compute pivot 
+        {
+            const char* treePath = "assets/models/tree/tree.obj";
+            std::cout << "Trying: " << treePath << "\n";
+            std::cout << "Exists? " << std::filesystem::exists(treePath) << "\n";
+
+            std::vector<ModelVertex> tv;
+            std::vector<unsigned int> ti;
+
+            if (!LoadOBJ_Minimal(treePath, tv, ti))
+            {
+                std::cerr << "Tree OBJ failed to load: " << treePath << "\n";
+                treeModelLoaded = false;
+            }
+            else
+            {
+                treeModel.Upload(tv, ti);
+                treeModelLoaded = true;
+            }
+
+            treeModelMinY = 1e9f;
+            treeModelMaxY = -1e9f;
+            for (const auto& v : tv)
+            {
+                treeModelMinY = std::min(treeModelMinY, v.pos.y);
+                treeModelMaxY = std::max(treeModelMaxY, v.pos.y);
+            }
+
+            float trunkMinY = treeModelMinY;
+            float sliceTop = trunkMinY + (treeModelMaxY - treeModelMinY) * 0.03f;
+
+            glm::vec3 baseSum(0.0f);
+            int baseCount = 0;
+
+            for (const auto& v : tv)
+            {
+                if (v.pos.y <= sliceTop)
+                {
+                    baseSum.x += v.pos.x;
+                    baseSum.z += v.pos.z;
+                    baseCount++;
+                }
+            }
+
+            treePivotMS = glm::vec3(0.0f);
+            if (baseCount > 0)
+            {
+                treePivotMS.x = baseSum.x / (float)baseCount;
+                treePivotMS.z = baseSum.z / (float)baseCount;
+            }
+            treePivotMS.y = trunkMinY;
+
+            treeTrunkMinY = trunkMinY;
+
+            std::cout << "Tree minY=" << treeModelMinY
+                << " trunkMinY=" << treeTrunkMinY
+                << " pivotMS=(" << treePivotMS.x << "," << treePivotMS.y << "," << treePivotMS.z << ")\n";
+        }
+
+        // Load lighthouse OBJ
+        {
+            const char* path = "assets/models/lighthouse/lighthouse.obj";
+            std::vector<ModelVertex> v;
+            std::vector<unsigned int> i;
+
+            std::cout << "Trying: " << path << "\n";
+            std::cout << "Exists? " << std::filesystem::exists(path) << "\n";
+
+            if (!LoadOBJ_Minimal(path, v, i))
+            {
+                std::cerr << "Lighthouse OBJ failed to load: " << path << "\n";
+                lighthouseLoaded = false;
+            }
+            else
+            {
+                lighthouseModel.Upload(v, i);
+                lighthouseLoaded = true;
+            }
+
+            // Build beam cone model
+            BuildConeModel(beamModel, 10.0f, 6.0f, 128);
+            beamLoaded = true;
+
+
+        }
+
+        RebuildWorld(cfg.seed);
         tod.speed = cfg.timeSpeed;
 
         std::cout << "\nControls:\n"
@@ -1105,10 +1416,9 @@ public:
             << "  F: toggle fog\n"
             << "  P: toggle wireframe\n"
             << "  O: toggle storm mode\n"
-            << "  T/G: time speed +/-\n"
-            << "  Y/H: wave strength +/-\n"
-            << "  U/J: wave speed +/-\n"
+            << "  B: toggle ForceBeamDebug\n"
             << "  ESC: quit\n\n";
+
 
         return true;
     }
@@ -1126,7 +1436,6 @@ public:
             if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
                 glfwSetWindowShouldClose(window, true);
 
-            // FPS counter
             fpsTimer += dt;
             frameCount++;
             if (fpsTimer >= 1.0f)
@@ -1138,12 +1447,10 @@ public:
 
             HandleInteraction();
 
-            // Slope-based movement penalty
             Island* isl = NearestIsland(camera.pos.x, camera.pos.z);
             glm::vec3 groundN(0, 1, 0);
             if (isl)
             {
-                // convert world position into island-local space:
                 float lx = camera.pos.x - isl->centerXZ.x;
                 float lz = camera.pos.z - isl->centerXZ.y;
                 groundN = isl->terrain.SampleNormalAtWorldXZ(lx, lz);
@@ -1154,9 +1461,6 @@ public:
 
             camera.ProcessKeyboard(window, dt, speedMul);
             tod.Update(dt);
-
-            UpdateObjective(now);
-            UpdateBiome(now);
 
             Render(now);
 
@@ -1174,13 +1478,19 @@ public:
         }
         islands.clear();
 
+        treeModel.Destroy();
+        lighthouseModel.Destroy();
         water.Destroy();
         sky.Destroy();
+
+        if (treePaletteTex) glDeleteTextures(1, &treePaletteTex);
+        treePaletteTex = 0;
 
         terrainShader.reset();
         skyShader.reset();
         waterShader.reset();
         treeShader.reset();
+        lighthouseShader.reset();
 
         if (window) glfwDestroyWindow(window);
         glfwTerminate();
@@ -1192,7 +1502,6 @@ private:
     int width = 1280, height = 720;
 
     std::vector<Island> islands;
-
     WorldConfig cfg;
 
     Camera camera;
@@ -1200,11 +1509,36 @@ private:
 
     Water water;
     Skybox sky;
-    std::unique_ptr<Shader> terrainShader, skyShader, waterShader, treeShader;
 
-    // Interaction toggles
+    std::unique_ptr<Shader> terrainShader, skyShader, waterShader, treeShader;
+    std::unique_ptr<Shader> lighthouseShader, beamShader;
+
+
+    GLModel treeModel;
+    bool treeModelLoaded = false;
+
+    GLModel lighthouseModel;
+    bool lighthouseLoaded = false;
+
+    GLModel beamModel;
+    bool beamLoaded = false;
+
+
+    GLuint treePaletteTex = 0;
+
     bool wireframe = false;
 
+    KeyLatch kRegen, kFog, kWire, kStorm, kBeamDbg;
+    bool forceBeamDebug = true; 
+
+    KeyLatch kBeamWire;
+    bool forceBeamWire = true;
+
+
+    float fpsTimer = 0.0f;
+    int frameCount = 0;
+
+private:
     Island* NearestIsland(float x, float z)
     {
         if (islands.empty()) return nullptr;
@@ -1225,44 +1559,65 @@ private:
         return best;
     }
 
-    // Latches
-    KeyLatch kRegen, kFog, kWire, kStorm;
-    KeyLatch kTimeUp, kTimeDown, kWaveUp, kWaveDown, kWaveSpeedUp, kWaveSpeedDown;
-
-    // Objective
-    float summitHeight = 0.0f;
-    bool summitReached = false;
-    float bestHeight = -1e9f;
-    float lastHudPrint = 0.0f;
-
-    // FPS
-    float fpsTimer = 0.0f;
-    int frameCount = 0;
-
-    // Local “tile” biomes 
-    enum class Biome { Beach, Grassland, Forest, Mountain };
-    bool biomeInit = false;
-    Biome lastBiome = Biome::Beach;
-    float lastBiomePrint = 0.0f;
-
-private:
     static IslandBiome PickIslandBiome(std::mt19937& rng)
     {
         std::uniform_real_distribution<float> u(0.0f, 1.0f);
         float r = u(rng);
 
-        // tweak these odds however you want
         if (r < 0.35f) return IslandBiome::Forest;
         if (r < 0.60f) return IslandBiome::Grassland;
         if (r < 0.80f) return IslandBiome::Snow;
         return IslandBiome::Desert;
     }
 
+    // Pick a coastline-ish position: near edge, not too steep, just above sea level.
+    bool FindLighthouseSpot(const Terrain& t, glm::vec3& outLocalPos) const
+    {
+        const auto& v = t.Verts();
+        if (v.empty()) return false;
+
+        float half = t.HalfSize();
+        float sea = t.seaLevel;
+
+        glm::vec3 best(0.0f);
+        float bestScore = -1e9f;
+        int bestIdx = -1;
+
+        for (int i = 0; i < (int)v.size(); i++)
+        {
+            const glm::vec3 p = v[i].pos;
+            const glm::vec3 n = v[i].normal;
+
+          
+            if (p.y < sea + 0.10f) continue;
+            if (p.y > sea + 2.20f) continue;
+
+            float r = glm::length(glm::vec2(p.x, p.z));
+            float edge01 = glm::clamp((r - half * 0.70f) / (half * 0.28f), 0.0f, 1.0f);
+
+            float flat01 = glm::clamp((n.y - 0.75f) / (1.0f - 0.75f), 0.0f, 1.0f);
+
+            float score = edge01 * 2.0f + flat01 * 1.5f;
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = p;
+                bestIdx = i;
+            }
+        }
+
+        if (bestIdx < 0) return false;
+
+        outLocalPos = best;
+        outLocalPos.y = t.SampleHeightAtWorldXZ(outLocalPos.x, outLocalPos.z);
+        return true;
+    }
+
     void RebuildWorld(int seed)
     {
         cfg.seed = seed;
 
-        // Build a big ocean using oceanHalfSize
         water.y = cfg.seaLevel + cfg.waveStrength * 0.6f + 0.10f;
         water.BuildFromWorldSize(cfg.oceanHalfSize, cfg.waterSpacing);
 
@@ -1272,6 +1627,7 @@ private:
         std::mt19937 rng(cfg.seed);
         std::uniform_real_distribution<float> ang(0.0f, glm::two_pi<float>());
         std::uniform_real_distribution<float> rad(0.0f, cfg.islandSpawnRadius);
+        std::uniform_real_distribution<float> chance01(0.0f, 1.0f);
 
         auto farEnough = [&](const glm::vec2& p, const std::vector<glm::vec2>& placed)
             {
@@ -1287,16 +1643,11 @@ private:
         std::vector<glm::vec2> placed;
         placed.reserve(cfg.islandCount);
 
-        summitHeight = -1e9f;
-        summitReached = false;
-        bestHeight = -1e9f;
-
         for (int i = 0; i < cfg.islandCount; i++)
         {
             glm::vec2 pos(0.0f);
             bool ok = false;
 
-            // find a non-overlapping position
             for (int tries = 0; tries < 300; tries++)
             {
                 float a = ang(rng);
@@ -1323,42 +1674,59 @@ private:
             isl.centerXZ = pos;
             isl.seed = cfg.seed + i * 9991;
 
-            // choose island-level biome
             isl.biome = PickIslandBiome(rng);
 
-            // terrain
             isl.terrain.seaLevel = cfg.seaLevel;
             isl.terrain.Build(cfg.terrainGrid, cfg.terrainSpacing, isl.seed, isl.biome);
 
-            // Island model transform
             isl.model = glm::translate(glm::mat4(1.0f), glm::vec3(pos.x, 0.0f, pos.y));
 
-            // trees
-         
-                isl.trees.BuildMesh();
-
+            // Trees
             bool spawnTrees = (isl.biome == IslandBiome::Forest) || (isl.biome == IslandBiome::Grassland);
-            if (spawnTrees)
+            if (spawnTrees && treeModelLoaded)
             {
+                isl.trees.InitForMesh(treeModel.mesh);
                 glm::vec3 islandOffset(isl.centerXZ.x, 0.0f, isl.centerXZ.y);
-                isl.trees.PlaceOnTerrain(isl.terrain, isl.seed + 555, islandOffset);
+                isl.trees.PlaceOnTerrain(isl.terrain, isl.seed + 555, islandOffset, treePivotMS);
+                isl.trees.UploadInstances();
             }
             else
             {
                 isl.trees.ClearInstances();
             }
 
-            // update summit height
-            summitHeight = std::max(summitHeight, (float)isl.terrain.MaxHeight());
+            // Lighthouse
+            isl.hasLighthouse = false;
+            if (lighthouseLoaded && chance01(rng) < cfg.lighthouseChancePerIsland)
+            {
+                glm::vec3 localSpot;
+                if (FindLighthouseSpot(isl.terrain, localSpot))
+                {
+                    glm::vec3 worldOffset(isl.centerXZ.x, 0.0f, isl.centerXZ.y);
+                    glm::vec3 posWS = localSpot + worldOffset;
 
-            std::cout << "Island " << i << " biome: " << IslandBiomeName(isl.biome) << "\n";
-        } //
+                   
+                    glm::vec2 d = glm::normalize(glm::vec2(localSpot.x, localSpot.z));
+                    float yaw = atan2(d.y, d.x) + glm::pi<float>(); // face outward
+
+                    glm::mat4 T = glm::translate(glm::mat4(1.0f), posWS);
+                    glm::mat4 R = glm::rotate(glm::mat4(1.0f), yaw, glm::vec3(0, 1, 0));
+                    glm::mat4 S = glm::scale(glm::mat4(1.0f), glm::vec3(cfg.lighthouseScale));
+
+                    isl.lighthouseModel = T * R * S;
+                    isl.lighthousePosWS = posWS;
+                    isl.hasLighthouse = true;
+                }
+            }
+
+            std::cout << "Island " << i << " biome: " << IslandBiomeName(isl.biome)
+                << (isl.hasLighthouse ? " + Lighthouse" : "") << "\n";
+        }
 
         std::cout << "World rebuilt. Seed=" << cfg.seed
             << " Islands=" << cfg.islandCount
             << " OceanHalfSize=" << cfg.oceanHalfSize << "\n";
-    } // 
-
+    }
 
     void HandleInteraction()
     {
@@ -1381,119 +1749,51 @@ private:
             std::cout << "Wireframe: " << (wireframe ? "ON" : "OFF") << "\n";
         }
 
-        // Storm mode toggle
         if (kStorm.JustPressed(glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS))
         {
             cfg.stormMode = !cfg.stormMode;
             std::cout << "Storm mode: " << (cfg.stormMode ? "ON" : "OFF") << "\n";
         }
-
-        if (kTimeUp.JustPressed(glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS))
+        if (kBeamDbg.JustPressed(glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS))
         {
-            tod.speed = std::min(tod.speed + 0.01f, 0.30f);
-            std::cout << "Time speed: " << tod.speed << "\n";
+            forceBeamDebug = !forceBeamDebug;
+            std::cout << "ForceBeamDebug: " << (forceBeamDebug ? "ON" : "OFF") << "\n";
         }
-        if (kTimeDown.JustPressed(glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS))
+        if (kBeamWire.JustPressed(glfwGetKey(window, GLFW_KEY_V) == GLFW_PRESS))
         {
-            tod.speed = std::max(tod.speed - 0.01f, 0.0f);
-            std::cout << "Time speed: " << tod.speed << "\n";
-        }
-
-        if (kWaveUp.JustPressed(glfwGetKey(window, GLFW_KEY_Y) == GLFW_PRESS))
-        {
-            cfg.waveStrength = std::min(cfg.waveStrength + 0.05f, 2.0f);
-            std::cout << "Wave strength: " << cfg.waveStrength << "\n";
-        }
-        if (kWaveDown.JustPressed(glfwGetKey(window, GLFW_KEY_H) == GLFW_PRESS))
-        {
-            cfg.waveStrength = std::max(cfg.waveStrength - 0.05f, 0.0f);
-            std::cout << "Wave strength: " << cfg.waveStrength << "\n";
+            forceBeamWire = !forceBeamWire;
+            std::cout << "ForceBeamWire: " << (forceBeamWire ? "ON" : "OFF") << "\n";
         }
 
-        if (kWaveSpeedUp.JustPressed(glfwGetKey(window, GLFW_KEY_U) == GLFW_PRESS))
-        {
-            cfg.waveSpeed = std::min(cfg.waveSpeed + 0.2f, 5.0f);
-            std::cout << "Wave speed: " << cfg.waveSpeed << "\n";
-        }
-        if (kWaveSpeedDown.JustPressed(glfwGetKey(window, GLFW_KEY_J) == GLFW_PRESS))
-        {
-            cfg.waveSpeed = std::max(cfg.waveSpeed - 0.2f, 0.0f);
-            std::cout << "Wave speed: " << cfg.waveSpeed << "\n";
-        }
-    }
 
-    void UpdateObjective(float now)
-    {
-        bestHeight = std::max(bestHeight, camera.pos.y);
-
-        if (!summitReached && camera.pos.y >= summitHeight - 0.35f)
-        {
-            summitReached = true;
-            std::cout << "\n*** SUMMIT REACHED! ***\n"
-                << "Seed=" << cfg.seed << "  SummitY=" << summitHeight
-                << "  TimeOfDay=" << tod.t01 << "\n\n";
-        }
-
-        if (now - lastHudPrint >= 1.0f)
-        {
-            lastHudPrint = now;
-            std::cout << "Y=" << camera.pos.y
-                << "  BestY=" << bestHeight
-                << "  SummitY=" << summitHeight
-                << "  Seed=" << cfg.seed
-                << "  Fog=" << (cfg.fogEnabled ? "1" : "0")
-                << "  Storm=" << (cfg.stormMode ? "1" : "0")
-                << "\n";
-        }
-    }
-
-    Biome ClassifyBiome(float h, float m) const
-    {
-        if (h < cfg.seaLevel + 0.30f) return Biome::Beach;
-
-        if (h < cfg.seaLevel + 4.5f)
-            return (m > 0.55f) ? Biome::Forest : Biome::Grassland;
-
-        return Biome::Mountain;
-    }
-
-    void UpdateBiome(float now)
-    {
-        if (now - lastBiomePrint < 0.20f) return;
-        lastBiomePrint = now;
-
-        Island* isl = NearestIsland(camera.pos.x, camera.pos.z);
-        if (!isl) return;
-
-        // convert world to island-local coords
-        float lx = camera.pos.x - isl->centerXZ.x;
-        float lz = camera.pos.z - isl->centerXZ.y;
-
-        float h = isl->terrain.SampleHeightAtWorldXZ(lx, lz);
-        float m = isl->terrain.SampleMoistureAtWorldXZ(lx, lz);
-
-        Biome b = ClassifyBiome(h, m);
-        if (!biomeInit || b != lastBiome)
-        {
-            biomeInit = true;
-            lastBiome = b;
-
-            switch (b)
-            {
-            case Biome::Beach:     std::cout << "Biome: Beach\n"; break;
-            case Biome::Grassland: std::cout << "Biome: Grassland\n"; break;
-            case Biome::Forest:    std::cout << "Biome: Forest\n"; break;
-            case Biome::Mountain:  std::cout << "Biome: Mountain\n"; break;
-            }
-        }
     }
 
     void Render(float timeSeconds)
     {
-        glm::vec3 lightDir = tod.LightDir();
-        glm::vec3 lightCol = tod.LightColor();
+        glm::vec3 sunDir = tod.LightDir();
+        glm::vec3 sunCol = tod.LightColor();
 
-        // Storm affects fog & waves
+        float innerCos = glm::cos(glm::radians(12.0f));
+        float outerCos = glm::cos(glm::radians(20.0f));
+        float spin = timeSeconds * cfg.lighthouseBeamSpinSpeed;
+        // Horizontal spin direction
+        glm::vec3 flatDir = glm::normalize(glm::vec3(cos(spin), 0.0f, sin(spin)));
+
+        // Constant downward tilt (negative Y)
+        const float tiltDeg = 18.0f;
+        glm::vec3 beamDir = glm::normalize(glm::vec3(
+            flatDir.x * cos(glm::radians(tiltDeg)),
+            -sin(glm::radians(tiltDeg)),
+            flatDir.z * cos(glm::radians(tiltDeg))
+        ));
+
+
+
+        static float prevTime = 0.0f;
+        float dt = timeSeconds - prevTime;
+        prevTime = timeSeconds;
+        if (dt < 0.0f) dt = 0.0f;
+
         float fogDensity = cfg.fogDensity * (cfg.stormMode ? cfg.stormFogMultiplier : 1.0f);
         float waveStrength = cfg.waveStrength * (cfg.stormMode ? cfg.stormWaveMultiplier : 1.0f);
 
@@ -1506,11 +1806,7 @@ private:
             glViewport(0, 0, fbw, fbh);
         }
 
-        glDisable(GL_SCISSOR_TEST);
-
-
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glDisable(GL_SCISSOR_TEST);
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glDepthMask(GL_TRUE);
         glDisable(GL_BLEND);
@@ -1518,50 +1814,345 @@ private:
         glClearColor(cfg.fogColor.r, cfg.fogColor.g, cfg.fogColor.b, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-
-      
-
-
         glm::mat4 view = camera.ViewMatrix();
         glm::mat4 proj = glm::perspective(glm::radians(60.f),
             (float)width / (float)height, 2.0f, 5000.f);
 
         glm::mat4 model(1.0f);
 
-        sky.Draw(*skyShader, view, proj, lightDir, tod.t01);
+        sky.Draw(*skyShader, view, proj, sunDir, tod.t01);
+
+        float night = NightFactor(tod.t01);
+
+       
+        float beamVis = 1.0f;
+
+
+        float lightVis = 1.0f;
+
+
+        // Lighthouse light color 
+        glm::vec3 lhCol(1.0f, 0.95f, 0.80f);
+
+       
+   // Pick one lighthouse to affect the whole water 
+  
+        glm::vec3 waterLhPosWS(0.0f, -99999.0f, 0.0f);
+        float waterLhIntensity = 0.0f;
+
+        int bestIdx = -1;
+        float bestD = 1e30f;
+
+        // find closest lighthouse this frame
+        for (int i = 0; i < (int)islands.size(); i++)
+        {
+            auto& isl = islands[i];
+            if (!isl.hasLighthouse) continue;
+
+            glm::vec3 lhPosWS = isl.lighthousePosWS
+                + glm::vec3(0.0f, cfg.lighthouseLanternHeight * cfg.lighthouseScale, 0.0f);
+
+            float d = glm::length(lhPosWS - camera.pos);
+            if (d < bestD)
+            {
+                bestD = d;
+                bestIdx = i;
+            }
+        }
+
+        // keep current lighthouse unless the new one is closer
+        if (waterLightIdx == -1)
+        {
+            waterLightIdx = bestIdx;
+            waterLightDist = bestD;
+        }
+        else
+        {
+            // if current became invalid, or new is 15% closer, switch
+            if (waterLightIdx < 0 || waterLightIdx >= (int)islands.size() ||
+                !islands[waterLightIdx].hasLighthouse ||
+                (bestIdx != -1 && bestD < waterLightDist * 0.85f))
+            {
+                waterLightIdx = bestIdx;
+                waterLightDist = bestD;
+            }
+        }
+
+        // output uniforms from the chosen lighthouse
+        if (waterLightIdx != -1 && islands[waterLightIdx].hasLighthouse)
+        {
+            glm::vec3 lhPosWS = islands[waterLightIdx].lighthousePosWS
+                + glm::vec3(0.0f, cfg.lighthouseLanternHeight * cfg.lighthouseScale, 0.0f);
+
+            waterLhPosWS = lhPosWS;
+            waterLhIntensity = lightVis * cfg.lighthouseLightStrength;
+        }
+
+       
+
+
+
+        auto AimMatrixFromDirY = [](const glm::vec3& dir) -> glm::mat4
+            {
+                glm::vec3 up = glm::normalize(dir);          
+                glm::vec3 ref(0.0f, 0.0f, 1.0f);            
+
+                // if ref is too close to up, pick another ref
+                if (fabs(glm::dot(up, ref)) > 0.98f) ref = glm::vec3(1.0f, 0.0f, 0.0f);
+
+                glm::vec3 right = glm::normalize(glm::cross(ref, up));
+                glm::vec3 fwd = glm::normalize(glm::cross(up, right));
+
+                glm::mat4 R(1.0f);
+                // columns: right (X), up (Y), forward (Z)
+                R[0] = glm::vec4(right, 0.0f);
+                R[1] = glm::vec4(up, 0.0f);
+                R[2] = glm::vec4(fwd, 0.0f);
+                return R;
+            };
+
 
         for (auto& isl : islands)
         {
             float islandBiomeId = (float)(int)isl.biome;
 
+            // Per-island lighthouse light inputs 
+            glm::vec3 lhPosWS(0.0f, -99999.0f, 0.0f);
+            float lhIntensity = 0.0f;
+
+            if (isl.hasLighthouse)
+            {
+                lhPosWS = isl.lighthousePosWS
+                    + glm::vec3(0.0f, cfg.lighthouseLanternHeight * cfg.lighthouseScale, 0.0f);
+
+            lhIntensity = lightVis * cfg.lighthouseLightStrength;
+
+
+                if (isl.hasLighthouse) {
+                    float distToCam = glm::length(lhPosWS - camera.pos);
+                    std::cout << "[LH] distToCam=" << distToCam
+                        << " lhIntensity=" << lhIntensity
+                        << " night=" << night
+                        << "\n";
+                }
+
+
+            }
+            std::cout << "LH pos " << lhPosWS.x << "," << lhPosWS.y << "," << lhPosWS.z
+                << " intensity " << lhIntensity << "\n";
+            // Terrain and lighthouse interaction
             isl.terrain.Draw(*terrainShader, isl.model, view, proj, camera,
-                lightDir, lightCol, cfg.fogEnabled, cfg.fogColor, fogDensity,
+                sunDir, sunCol,
+                cfg.fogEnabled, cfg.fogColor, fogDensity,
                 islandBiomeId,
-                (float)isl.seed);
+                (float)isl.seed,
+                lhPosWS, lhCol, lhIntensity,
+                beamDir, innerCos, outerCos);
 
-            GLenum err = glGetError();
-            if (err != GL_NO_ERROR) std::cout << "GL error: " << err << "\n";
+            // Trees and lighthouse interaction
+            if (treeModelLoaded)
+            {
+                treeShader->Use();
+
+                treeShader->SetMat4("uView", glm::value_ptr(view));
+                treeShader->SetMat4("uProj", glm::value_ptr(proj));
+                treeShader->SetVec3("uViewPos", camera.pos.x, camera.pos.y, camera.pos.z);
+                treeShader->SetVec3("uLightDir", sunDir.x, sunDir.y, sunDir.z);
+                treeShader->SetVec3("uLightColor", sunCol.x, sunCol.y, sunCol.z);
+
+                treeShader->SetFloat("uAmbientStrength", 0.25f);
+                treeShader->SetFloat("uSpecStrength", 0.15f);
+                treeShader->SetFloat("uShininess", 16.0f);
+
+                treeShader->SetFloat("uFogEnabled", cfg.fogEnabled ? 1.0f : 0.0f);
+                treeShader->SetVec3("uFogColor", cfg.fogColor.x, cfg.fogColor.y, cfg.fogColor.z);
+                treeShader->SetFloat("uFogDensity", fogDensity);
+
+                treeShader->SetFloat("uTime", timeSeconds);
+
+                treeShader->SetFloat("uTreeMinY", treeTrunkMinY);
+                treeShader->SetFloat("uTreeMaxY", treeModelMaxY);
+                treeShader->SetFloat("uTrunkFrac", 0.35f);
+
+                treeShader->SetVec3("uPointLightPos", lhPosWS.x, lhPosWS.y, lhPosWS.z);
+                treeShader->SetVec3("uPointLightColor", lhCol.x, lhCol.y, lhCol.z);
+                treeShader->SetFloat("uPointLightIntensity", lhIntensity);
+                treeShader->SetVec3("uBeamDir", beamDir.x, beamDir.y, beamDir.z);
+                treeShader->SetFloat("uBeamInnerCos", innerCos);
+                treeShader->SetFloat("uBeamOuterCos", outerCos);
+
+                isl.trees.DrawInstanced(treeModel.mesh.indexCount);
+            }
+
+            // Draw lighthouse model
+            if (lighthouseLoaded && isl.hasLighthouse)
+            {
+                lighthouseShader->Use();
+                lighthouseShader->SetMat4("uModel", glm::value_ptr(isl.lighthouseModel));
+                lighthouseShader->SetMat4("uView", glm::value_ptr(view));
+                lighthouseShader->SetMat4("uProj", glm::value_ptr(proj));
+
+                lighthouseShader->SetVec3("uViewPos", camera.pos.x, camera.pos.y, camera.pos.z);
+
+                lighthouseShader->SetVec3("uLightDir", sunDir.x, sunDir.y, sunDir.z);
+                lighthouseShader->SetVec3("uLightColor", sunCol.x, sunCol.y, sunCol.z);
+
+                lighthouseShader->SetFloat("uAmbientStrength", 0.22f);
+                lighthouseShader->SetFloat("uSpecStrength", 0.35f);
+                lighthouseShader->SetFloat("uShininess", 64.0f);
+
+                lighthouseShader->SetFloat("uFogEnabled", cfg.fogEnabled ? 1.0f : 0.0f);
+                lighthouseShader->SetVec3("uFogColor", cfg.fogColor.x, cfg.fogColor.y, cfg.fogColor.z);
+                lighthouseShader->SetFloat("uFogDensity", fogDensity);
+
+                lighthouseShader->SetFloat("uNightFactor", night);
+                lighthouseShader->SetVec3("uLanternPosWS", lhPosWS.x, lhPosWS.y, lhPosWS.z);
+                lighthouseShader->SetVec3("uLanternColor", lhCol.x, lhCol.y, lhCol.z);
+                lighthouseShader->SetFloat("uLanternIntensity", lhIntensity);
+
+                lighthouseModel.mesh.Bind();
+                glDrawElements(GL_TRIANGLES, lighthouseModel.mesh.indexCount, GL_UNSIGNED_INT, 0);
+                glBindVertexArray(0);
+
+            
+        //  Beam Draw
+                if (beamLoaded && beamShader && beamShader->linkedOk && (beamVis > 0.02f))
+
+                {
+                    const float CONE_H = 10.0f;  // MUST match BuildConeModel height
+                    const float CONE_R = 6.0f;   // MUST match BuildConeModel radius
+                    glm::vec3 dir = beamDir; 
 
 
-            // trees only appear on the island where they should
-            isl.trees.Draw(*treeShader, view, proj, camera, lightDir, lightCol,
-                cfg.fogEnabled, cfg.fogColor, fogDensity, timeSeconds);
+                    glm::vec3 beamStartWS = lhPosWS + glm::vec3(0.0f, -10.5f, 0.0f);
+
+
+
+                    float scaleY = cfg.lighthouseBeamLength / CONE_H;
+                    float scaleXZ = cfg.lighthouseBeamRadius / CONE_R;
+                   
+                    glm::mat4 BM(1.0f);
+
+                    // Translate to lantern
+                    BM = glm::translate(BM, beamStartWS);
+
+                 
+                    BM = BM * AimMatrixFromDirY(dir);
+
+                    // Scale cone after aiming
+                    BM = BM * glm::scale(glm::mat4(1.0f), glm::vec3(scaleXZ, scaleY, scaleXZ));
+
+
+
+                  
+
+                    //  debug print 
+                    static float beamDbgAccum = 0.0f;
+                    beamDbgAccum += dt;
+                    if (beamDbgAccum > 1.0f)
+                    {
+                        beamDbgAccum = 0.0f;
+                        std::cout << "[BEAM] dbg=" << (forceBeamDebug ? 1 : 0)
+                            << " night=" << night
+                            << " tod=" << tod.t01
+                            << " lhPos=(" << lhPosWS.x << "," << lhPosWS.y << "," << lhPosWS.z << ")"
+                            << " dir=(" << dir.x << "," << dir.y << "," << dir.z << ")"
+                            << " start=(" << beamStartWS.x << "," << beamStartWS.y << "," << beamStartWS.z << ")"
+                            << " scaleXZ=" << scaleXZ << " scaleY=" << scaleY
+                            << " vao=" << beamModel.mesh.vao
+                            << " vbo=" << beamModel.mesh.vbo
+                            << " ebo=" << beamModel.mesh.ebo
+                            << " idx=" << beamModel.mesh.indexCount
+                            << "\n";
+                    }
+
+                    glDisable(GL_CULL_FACE);
+                    glDepthMask(GL_FALSE);
+                    glEnable(GL_BLEND);
+
+                    if (forceBeamWire)
+                    {
+                        // Always visible wireframe cone
+                        glDisable(GL_DEPTH_TEST);          
+                        glBlendFunc(GL_ONE, GL_ONE);      
+                        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+                    }
+                    else if (forceBeamDebug)
+                    {
+                        glDisable(GL_DEPTH_TEST);
+                        glBlendFunc(GL_ONE, GL_ONE);
+                        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+                    }
+                    else
+                    {
+                        glEnable(GL_DEPTH_TEST);
+                        glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+                        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+                    }
+
+
+                    beamShader->Use();
+                    beamShader->SetMat4("uModel", glm::value_ptr(BM));
+                    beamShader->SetMat4("uView", glm::value_ptr(view));
+                    beamShader->SetMat4("uProj", glm::value_ptr(proj));
+                    beamShader->SetVec3("uViewPos", camera.pos.x, camera.pos.y, camera.pos.z);
+                    beamShader->SetFloat("uDebugWire", forceBeamWire ? 1.0f : 0.0f);
+
+                    if (forceBeamWire)
+                    {
+                        beamShader->SetVec3("uBeamColor", 0.0f, 1.0f, 0.0f); // bright green to make it easy to see
+                        beamShader->SetFloat("uBeamStrength", 50.0f);
+                        beamShader->SetFloat("uFogEnabled", 0.0f);
+                    }
+                    else if (forceBeamDebug)
+                    {
+                        beamShader->SetVec3("uBeamColor", 1.0f, 1.0f, 1.0f);
+                        beamShader->SetFloat("uBeamStrength", 10.0f);
+                        beamShader->SetFloat("uFogEnabled", 0.0f);
+                    }
+                    else
+                    {
+                        beamShader->SetVec3("uBeamColor", lhCol.x, lhCol.y, lhCol.z);
+                        beamShader->SetFloat("uBeamStrength", cfg.lighthouseBeamStrength * beamVis);
+                        beamShader->SetFloat("uFogEnabled", cfg.fogEnabled ? 1.0f : 0.0f);
+                    }
+
+
+                    beamShader->SetVec3("uFogColor", cfg.fogColor.x, cfg.fogColor.y, cfg.fogColor.z);
+                    beamShader->SetFloat("uFogDensity", fogDensity);
+
+                    beamModel.mesh.Bind();
+                    glDrawElements(GL_TRIANGLES, beamModel.mesh.indexCount, GL_UNSIGNED_INT, 0);
+                    glBindVertexArray(0);
+
+                    //  Restore 
+                    glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
+                    glDisable(GL_BLEND);
+                    glDepthMask(GL_TRUE);
+                    glEnable(GL_DEPTH_TEST);
+                }
+
+
+
+            }
         }
-      
 
-        water.Draw(*waterShader, model, view, proj, camera, lightDir, lightCol,
+        water.Draw(*waterShader, model, view, proj, camera, sunDir, sunCol,
             timeSeconds, waveStrength, cfg.waveSpeed,
-            cfg.fogEnabled, cfg.fogColor, fogDensity);
+            cfg.fogEnabled, cfg.fogColor, fogDensity,
+            waterLhPosWS, lhCol, waterLhIntensity,
+            beamDir, innerCos, outerCos);
+
     }
 };
 
-int main()
-{
-    App app;
-    if (!app.Init())
-        return -1;
+    int main()
+    {
+        App app;
+        if (!app.Init())
+            return -1;
 
-    app.Run();
-    app.Shutdown();
-    return 0;
-}
+        app.Run();
+        app.Shutdown();
+        return 0;
+    }

@@ -18,16 +18,15 @@ out VS_OUT {
 void main()
 {
     vec4 wp = uModel * vec4(aPos, 1.0);
-
-    vs_out.worldPos  = wp.xyz;
+    vs_out.worldPos = wp.xyz;
 
     // correct normal transform
-    mat3 N = mat3(transpose(inverse(uModel)));
-    vs_out.normal = normalize(N * aNormal);
+    mat3 normalMat = transpose(inverse(mat3(uModel)));
+    vs_out.normal = normalize(normalMat * aNormal);
 
     vs_out.moisture = aMoisture;
 
-    // IMPORTANT: height comes from the vertex Y you already baked in C++
+    // height already baked in C++
     vs_out.height = aPos.y;
 
     gl_Position = uProj * uView * wp;

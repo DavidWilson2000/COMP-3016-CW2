@@ -13,6 +13,14 @@ uniform vec3  uViewPos;
 uniform vec3  uLightDir;
 uniform vec3  uLightColor;
 
+uniform vec3  uPointLightPos;
+uniform vec3  uPointLightColor;
+uniform float uPointLightIntensity;
+
+uniform vec3  uBeamDir;
+uniform float uBeamInnerCos;
+uniform float uBeamOuterCos;
+
 uniform float uAmbientStrength;
 uniform float uSpecStrength;
 uniform float uShininess;
@@ -20,30 +28,16 @@ uniform float uShininess;
 uniform float uSeaLevel;
 
 // Fog controls
-uniform float uFogEnabled; // 1.0 or 0.0
+uniform float uFogEnabled;
 uniform vec3  uFogColor;
 uniform float uFogDensity;
 
-// Per-island biome id from C++
-// 0=Forest, 1=Grassland, 2=Snow, 3=Desert
+// Island biome + seed
 uniform float uIslandBiome;
-
-// NEW: per-island seed (pass isl.seed from C++)
 uniform float uIslandSeed;
 
-// ------------------------------------------------------------
-// Hash / noise helpers (cheap, textureless)
-// ------------------------------------------------------------
-float hash(vec2 p)
-{
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-}
-
-float hash11(float n)
-{
-    return fract(sin(n) * 43758.5453);
-}
-
+// -------------------- your noise helpers --------------------
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise2f(vec2 p)
 {
     vec2 i = floor(p);
@@ -57,7 +51,6 @@ float noise2f(vec2 p)
     vec2 u = f * f * (3.0 - 2.0 * f);
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
-
 float fbm2f(vec2 p)
 {
     float sum = 0.0;
@@ -73,13 +66,10 @@ float fbm2f(vec2 p)
 }
 
 // float-safe biome equality mask
-float biomeIs(float id)
-{
-    return 1.0 - step(0.5, abs(uIslandBiome - id));
-}
+float biomeIs(float id) { return 1.0 - step(0.5, abs(uIslandBiome - id)); }
 
 // ------------------------------------------------------------
-// Biome shading
+// Biome shading (UNCHANGED from your version, pasted as-is)
 // ------------------------------------------------------------
 vec3 biomeColor(float h, float m, float slope)
 {
@@ -88,45 +78,39 @@ vec3 biomeColor(float h, float m, float slope)
     float isS = biomeIs(2.0);
     float isD = biomeIs(3.0);
 
-    // ---------------- Water palette (slightly tinted per biome) ----------------
     vec3 deepWaterBase    = vec3(0.02, 0.08, 0.15);
     vec3 shallowWaterBase = vec3(0.05, 0.20, 0.28);
 
     vec3 deepWater =
         deepWaterBase
-        + vec3(0.00, 0.00, 0.03) * isS   // colder
-        + vec3(0.02, 0.01, -0.02) * isD; // warmer
+        + vec3(0.00, 0.00, 0.03) * isS
+        + vec3(0.02, 0.01, -0.02) * isD;
 
     vec3 shallowWater =
         shallowWaterBase
         + vec3(0.02, 0.02, 0.04) * isS
         + vec3(0.03, 0.02, -0.02) * isD;
 
-    // ---------------- Base palettes per island ----------------
-    // Forest (deep greens)
     vec3 sand_F   = vec3(0.66, 0.60, 0.40);
     vec3 grass_F  = vec3(0.08, 0.34, 0.11);
     vec3 forest_F = vec3(0.04, 0.18, 0.07);
     vec3 rock_F   = vec3(0.36, 0.36, 0.40);
     vec3 snow_F   = vec3(0.94, 0.94, 0.97);
 
-    // Grassland (yellower, drier)
     vec3 sand_G   = vec3(0.70, 0.63, 0.44);
     vec3 grass_G  = vec3(0.20, 0.44, 0.12);
     vec3 forest_G = vec3(0.10, 0.26, 0.10);
     vec3 rock_G   = vec3(0.40, 0.40, 0.44);
     vec3 snow_G   = vec3(0.94, 0.94, 0.97);
 
-    // Snow (cold rock, bright snow)
     vec3 sand_S   = vec3(0.62, 0.63, 0.60);
     vec3 grass_S  = vec3(0.10, 0.20, 0.12);
     vec3 forest_S = vec3(0.06, 0.14, 0.10);
     vec3 rock_S   = vec3(0.30, 0.34, 0.42);
     vec3 snow_S   = vec3(0.97, 0.97, 0.99);
 
-    // Desert (warm sand + warm rock)
     vec3 sand_D   = vec3(0.82, 0.73, 0.48);
-    vec3 grass_D  = vec3(0.28, 0.30, 0.10); // scrub
+    vec3 grass_D  = vec3(0.28, 0.30, 0.10);
     vec3 forest_D = vec3(0.18, 0.20, 0.07);
     vec3 rock_D   = vec3(0.52, 0.44, 0.32);
     vec3 snow_D   = vec3(0.94, 0.94, 0.97);
@@ -137,66 +121,48 @@ vec3 biomeColor(float h, float m, float slope)
     vec3 rock   = rock_F   * isF + rock_G   * isG + rock_S   * isS + rock_D   * isD;
     vec3 snow   = snow_F   * isF + snow_G   * isG + snow_S   * isS + snow_D   * isD;
 
-    // ---------------- Height bands ----------------
     float waterBand = uSeaLevel;
-
-    // Snow islands: lower snowline a lot (so it reads as snowy from far away)
     float beachBand = uSeaLevel + mix(0.25, 0.16, isS);
     float rockBand  = uSeaLevel + mix(5.0,  3.8,  isS);
     float snowBand  = uSeaLevel + mix(7.0,  4.9,  isS);
 
-    // Desert: no snow
     snowBand = mix(snowBand, uSeaLevel + 999.0, isD);
     rockBand = mix(rockBand, uSeaLevel + 3.2, isD);
 
-    // ---------------- NEW: per-island band shift (varies treeline/rockline per island) ----------------
-    float islandShift = (hash(vec2(uIslandSeed, 12.34)) - 0.5) * 1.2; // ~[-0.6..+0.6]
+    float islandShift = (hash(vec2(uIslandSeed, 12.34)) - 0.5) * 1.2;
     beachBand += islandShift * 0.05;
     rockBand  += islandShift * 0.9;
     snowBand  += islandShift * 0.9;
 
-    // ---------------- Moisture usage per biome ----------------
     float wet_F = smoothstep(0.35, 0.68, m);
     float wet_G = smoothstep(0.55, 0.85, m);
-    float wet_S = smoothstep(0.55, 0.85, m) * 0.25; // muted veg
-    float wet_D = smoothstep(0.85, 0.98, m) * 0.18; // mostly dry
+    float wet_S = smoothstep(0.55, 0.85, m) * 0.25;
+    float wet_D = smoothstep(0.85, 0.98, m) * 0.18;
 
     float wet = wet_F * isF + wet_G * isG + wet_S * isS + wet_D * isD;
 
-    // slope -> rock push
     float steepRock = smoothstep(0.30, 0.70, slope);
 
-    // ---------------- Water ----------------
     if (h < waterBand - 0.30) return deepWater;
     if (h < waterBand)        return shallowWater;
 
-    // ---------------- Beach ----------------
     if (h < beachBand)
     {
-        // Snow island: icy shoreline tint
         vec3 icy = vec3(0.80, 0.84, 0.90);
         vec3 shore = mix(sand, icy, isS * 0.55);
-
-        // Desert: warmer shore
         shore += isD * vec3(0.04, 0.02, 0.00);
-
         return shore;
     }
 
-    // ---------------- Base land ----------------
     vec3 veg = mix(grass, forest, wet);
     vec3 land = mix(veg, rock, steepRock);
 
-    // push higher elevations toward rock (works for all biomes)
     float highRock = smoothstep(rockBand, snowBand, h);
     land = mix(land, rock, highRock);
 
-    // ---------------- FIX: snow cap ONLY on Snow islands ----------------
     if (isS > 0.5 && h > snowBand)
         land = snow;
 
-    // ---------------- Biome signatures ----------------
-    // FOREST: canopy patches (big dark blotches)
     if (isF > 0.5)
     {
         float canopy = fbm2f(fs_in.worldPos.xz * 0.03);
@@ -205,23 +171,20 @@ vec3 biomeColor(float h, float m, float slope)
         land += vec3(0.00, 0.02, 0.00) * patchMask;
     }
 
-    // GRASSLAND: dry/yellow variation + subtle banding
     if (isG > 0.5)
     {
         float dry    = fbm2f(fs_in.worldPos.xz * 0.05);
         float band = sin(fs_in.worldPos.x * 0.08 + fs_in.worldPos.z * 0.04) * 0.5 + 0.5;
         float mixv = 0.55 * dry + 0.45 * band;
-        land = mix(land, land + vec3(0.08, 0.06, 0.00), mixv * 0.35); // warmer/drier
+        land = mix(land, land + vec3(0.08, 0.06, 0.00), mixv * 0.35);
     }
 
-    // SNOW: “frosting” below snowline on slopes (only for snow islands)
     if (isS > 0.5)
     {
         float frosting = smoothstep(rockBand - 0.2, snowBand - 0.6, h) * smoothstep(0.15, 0.55, slope);
         land = mix(land, snow, frosting * 0.70);
     }
 
-    // DESERT: dunes (directional stripes) + warm baked tint
     if (isD > 0.5)
     {
         float duneCoord = fs_in.worldPos.x * 0.06 + fs_in.worldPos.z * 0.10;
@@ -233,9 +196,7 @@ vec3 biomeColor(float h, float m, float slope)
         land += flatness * vec3(0.05, 0.03, 0.00);
     }
 
-    // ---------------- NEW: per-island rock character (striated vs blotchy) ----------------
-    // Only affects areas that are already "rocky" (steep or high)
-    float rockStyle = hash(vec2(uIslandSeed, 99.1)); // 0..1
+    float rockStyle = hash(vec2(uIslandSeed, 99.1));
     float rockNoise = fbm2f(fs_in.worldPos.xz * mix(0.06, 0.12, rockStyle));
     float rockStreak = sin(fs_in.worldPos.x * 0.12 + fs_in.worldPos.z * 0.05) * 0.5 + 0.5;
 
@@ -246,48 +207,73 @@ vec3 biomeColor(float h, float m, float slope)
     return land;
 }
 
+// -------------------- NEW: helper for point + spotlight --------------------
+vec3 ApplyPointAndBeam(vec3 baseCol, vec3 N, vec3 V)
+{
+    // Vector from fragment -> light (for N·L)
+    vec3 toLight = uPointLightPos - fs_in.worldPos;
+    float dist = length(toLight);
+    if (dist < 0.0001) return vec3(0.0);
+
+    vec3 Lp = toLight / dist;
+
+    // World scale friendly attenuation (stronger / longer reach)
+    float atten = 1.0 / (1.0 + 0.015 * dist + 0.0006 * dist * dist);
+
+    // Basic point light diffuse + spec
+    float diffP = max(dot(N, Lp), 0.0);
+    vec3 Hp = normalize(Lp + V);
+    float specP = pow(max(dot(N, Hp), 0.0), uShininess);
+
+    vec3 point = (diffP * baseCol + (uSpecStrength * specP) * vec3(1.0)) * uPointLightColor;
+    point *= atten * uPointLightIntensity;
+
+    // Spotlight mask:
+    // Compare direction FROM LIGHT to fragment with beam direction.
+    vec3 lightToFrag = normalize(fs_in.worldPos - uPointLightPos);
+    float cosAng = dot(lightToFrag, normalize(uBeamDir));
+    float spot = smoothstep(uBeamOuterCos, uBeamInnerCos, cosAng);
+
+    // Keep a small lantern glow always, then boost inside cone.
+    float lantern = 0.20;          // always-on base
+    float beamBoost = 1.50;        // extra inside cone
+
+    return point * (lantern + beamBoost * spot);
+}
+
 void main()
 {
     vec3 N = normalize(fs_in.normal);
-
     vec3 V = normalize(uViewPos - fs_in.worldPos);
     vec3 L = normalize(-uLightDir);
 
     float slope = 1.0 - clamp(N.y, 0.0, 1.0);
     vec3 baseCol = biomeColor(fs_in.height, fs_in.moisture, slope);
 
-    // ------------------------------------------------------------
-    // NEW: Per-island tint (subtle overall grading per island)
-    // ------------------------------------------------------------
+    // Per-island tint
     float islandRand = hash(vec2(uIslandSeed, uIslandSeed * 0.37));
     vec3 tint = mix(vec3(0.96, 0.98, 1.02), vec3(1.04, 0.98, 0.96), islandRand);
     baseCol *= tint;
 
-    // ------------------------------------------------------------
-    // Biome-specific micro-variation (controls "texture feel")
-    // ------------------------------------------------------------
+    // Micro-variation
     float isS = biomeIs(2.0);
     float isD = biomeIs(3.0);
-
-    // add per-island offset so patterns don't repeat across islands
     vec2 islandUV = fs_in.worldPos.xz + vec2(uIslandSeed * 0.013, uIslandSeed * 0.017);
 
     float vDef  = hash(islandUV * 0.35);
-    float vSnow = hash(islandUV * 0.18); // cleaner
-    float vDes  = hash(islandUV * 0.70); // grainier
+    float vSnow = hash(islandUV * 0.18);
+    float vDes  = hash(islandUV * 0.70);
 
     float v = mix(vDef, vSnow, isS);
     v = mix(v, vDes, isD);
 
-    float amp = 0.08;               // default
-    amp = mix(amp, 0.03, isS);      // snow low noise
-    amp = mix(amp, 0.14, isD);      // desert higher grain
+    float amp = 0.08;
+    amp = mix(amp, 0.03, isS);
+    amp = mix(amp, 0.14, isD);
 
     baseCol *= mix(1.0 - amp, 1.0 + amp, v);
 
-    // ------------------------------------------------------------
-    // Lighting (Blinn-Phong)
-    // ------------------------------------------------------------
+    // Sun lighting
     vec3 ambient = uAmbientStrength * baseCol;
 
     float diff = max(dot(N, L), 0.0);
@@ -299,11 +285,15 @@ void main()
 
     vec3 color = ambient + diffuse + specular;
 
+    // Lighthouse point + beam (this is what you want working)
+    if (uPointLightIntensity > 0.001)
+        color += ApplyPointAndBeam(baseCol, N, V);
+
     // Fog
     if (uFogEnabled > 0.5)
     {
-        float dist = length(uViewPos - fs_in.worldPos);
-        float fogFactor = exp(-uFogDensity * dist);
+        float d = length(uViewPos - fs_in.worldPos);
+        float fogFactor = exp(-uFogDensity * d);
         fogFactor = clamp(fogFactor, 0.0, 1.0);
         color = mix(uFogColor, color, fogFactor);
     }

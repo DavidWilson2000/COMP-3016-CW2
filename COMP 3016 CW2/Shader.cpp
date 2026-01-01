@@ -33,18 +33,16 @@ GLuint Shader::Compile(GLenum type, const std::string& source)
         std::cerr << "Shader compilation error:\n" << infoLog << "\n";
 
         glDeleteShader(shader);
-        return 0; 
+        return 0;
     }
 
     return shader;
 }
 
-
 Shader::Shader(const std::string& vertexPath, const std::string& fragmentPath)
 {
     std::string vertexCode = LoadFile(vertexPath);
     std::string fragmentCode = LoadFile(fragmentPath);
-
 
     if (vertexCode.empty() || fragmentCode.empty())
     {
@@ -53,11 +51,9 @@ Shader::Shader(const std::string& vertexPath, const std::string& fragmentPath)
         ID = 0;
         return;
     }
- 
+
     GLuint vertex = Compile(GL_VERTEX_SHADER, vertexCode);
     GLuint fragment = Compile(GL_FRAGMENT_SHADER, fragmentCode);
-
-
 
     if (vertex == 0 || fragment == 0)
     {
@@ -88,13 +84,12 @@ Shader::Shader(const std::string& vertexPath, const std::string& fragmentPath)
     }
     else
     {
-        linkedOk = true; 
+        linkedOk = true;
     }
 
     glDeleteShader(vertex);
     glDeleteShader(fragment);
 }
-
 
 Shader::~Shader()
 {
@@ -106,6 +101,7 @@ void Shader::Use() const
     if (!linkedOk) return;
     glUseProgram(ID);
 }
+
 void Shader::SetMat4(const std::string& name, const float* value) const
 {
     if (!linkedOk || ID == 0) return;
@@ -130,3 +126,10 @@ void Shader::SetFloat(const std::string& name, float v) const
     glUniform1f(loc, v);
 }
 
+void Shader::SetInt(const std::string& name, int v) const
+{
+    if (!linkedOk || ID == 0) return;
+    GLint loc = glGetUniformLocation(ID, name.c_str());
+    if (loc < 0) return;
+    glUniform1i(loc, v);
+}

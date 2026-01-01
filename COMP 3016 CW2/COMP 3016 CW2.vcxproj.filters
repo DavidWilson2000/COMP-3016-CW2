@@ -16,6 +16,9 @@
     <Filter Include="Resource Files\shaders">
       <UniqueIdentifier>{1c938d6a-19f0-465b-bd94-ce5f19c0b95b}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\Models">
+      <UniqueIdentifier>{57c906ae-026b-49c3-a43b-d8d5faee0c20}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -24,10 +27,16 @@
     <ClCompile Include="Shader.cpp">
       <Filter>Resource Files\shaders</Filter>
     </ClCompile>
+    <ClCompile Include="loadpng.cpp">
+      <Filter>Source Files\Models</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Shader.h">
       <Filter>Resource Files\shaders</Filter>
+    </ClInclude>
+    <ClInclude Include="loadpng.h">
+      <Filter>Source Files\Models</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
