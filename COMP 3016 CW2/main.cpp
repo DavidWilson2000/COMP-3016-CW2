@@ -2542,7 +2542,7 @@ private:
 
 
         }
-
+         
         water.Draw(*waterShader, model, view, proj, camera, sunDir, sunCol,
             timeSeconds, waveStrength, cfg.waveSpeed,
             cfg.fogEnabled, cfg.fogColor, fogDensity,
@@ -2551,7 +2551,7 @@ private:
 
     }
 };
-
+ 
     int main()
     {
         App app;
