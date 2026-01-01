@@ -99,7 +99,7 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>glfw3.lib;glew32.lib;glew32s.lib;opengl32.lib;assimp-vc143-mt.lib;user32.lib;gdi32.lib;shell32.lib;ole32.lib;winmm.lib;irrKlang.lib</AdditionalDependencies>
-      <AdditionalLibraryDirectories>G:\Downloads\irrKlang-master\irrKlang-master\lib\Winx64-visualStudio;$(SolutionDir)OpenGL\lib;G:\Assimp\Binaries\lib\Release</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib\</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
       <Command>robocopy "$(ProjectDir)assets" "$(TargetDir)assets" /E /R:2 /W:1
@@ -127,7 +127,7 @@ copy /Y "G:\Assimp\bin\x64\assimp-vc143-mt.dll" "$(OutDir)"</Command>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>glfw3.lib;glew32.lib;glew32s.lib;opengl32.lib;assimp-vc143-mt.lib;user32.lib;gdi32.lib;shell32.lib;ole32.lib;winmm.lib;irrKlang.lib</AdditionalDependencies>
-      <AdditionalLibraryDirectories>G:\Downloads\irrKlang-master\irrKlang-master\lib\Winx64-visualStudio;$(SolutionDir)OpenGL\lib;G:\Assimp\Binaries\lib\Release</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib\</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
       <Command>robocopy "$(ProjectDir)assets" "$(TargetDir)assets" /E /R:2 /W:1
@@ -151,7 +151,7 @@ copy /Y "G:\Assimp\bin\x64\assimp-vc143-mt.dll" "$(OutDir)"</Command>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>glfw3.lib;glew32.lib;glew32s.lib;opengl32.lib;assimp-vc143-mt.lib;user32.lib;gdi32.lib;shell32.lib;ole32.lib;winmm.lib;irrKlang.lib</AdditionalDependencies>
-      <AdditionalLibraryDirectories>G:\Downloads\irrKlang-master\irrKlang-master\lib\Winx64-visualStudio;$(SolutionDir)OpenGL\lib;G:\Assimp\Binaries\lib\Release</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib\</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
       <Command>robocopy "$(ProjectDir)assets" "$(TargetDir)assets" /E /R:2 /W:1
@@ -179,7 +179,7 @@ copy /Y "G:\Assimp\bin\x64\assimp-vc143-mt.dll" "$(OutDir)"</Command>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>glfw3.lib;glew32.lib;glew32s.lib;opengl32.lib;assimp-vc143-mt.lib;user32.lib;gdi32.lib;shell32.lib;ole32.lib;winmm.lib;irrKlang.lib</AdditionalDependencies>
-      <AdditionalLibraryDirectories>G:\Downloads\irrKlang-master\irrKlang-master\lib\Winx64-visualStudio;$(SolutionDir)OpenGL\lib;G:\Assimp\Binaries\lib\Release</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib\</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
       <Command>robocopy "$(ProjectDir)assets" "$(TargetDir)assets" /E /R:2 /W:1
