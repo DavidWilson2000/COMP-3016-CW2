@@ -1320,7 +1320,7 @@ public:
             std::cerr << "Tree palette texture failed to create.\n";
 
         std::cout << "CWD = " << std::filesystem::current_path() << "\n";
-
+         
         //  Load tree OBJ + compute pivot 
         {
             const char* treePath = "assets/models/tree/tree.obj";

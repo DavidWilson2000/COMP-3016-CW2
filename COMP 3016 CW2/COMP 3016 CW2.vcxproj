@@ -102,9 +102,10 @@
       <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
-      <Command>xcopy /Y /D "$(SolutionDir)OpenGL\lib\glew32.dll" "$(TargetDir)"
-xcopy /Y /D "$(SolutionDir)OpenGL\lib\glfw3.dll" "$(TargetDir)"
-</Command>
+      <Command>xcopy /E /I /Y "$(ProjectDir)assets" "$(TargetDir)assets"
+xcopy /E /I /Y "$(ProjectDir)shaders" "$(TargetDir)shaders"
+xcopy /Y /D "$(SolutionDir)OpenGL\lib\glew32.dll" "$(TargetDir)"
+xcopy /Y /D "$(SolutionDir)OpenGL\lib\glfw3.dll" "$(TargetDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -127,9 +128,10 @@ xcopy /Y /D "$(SolutionDir)OpenGL\lib\glfw3.dll" "$(TargetDir)"
       <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
-      <Command>xcopy /Y /D "$(SolutionDir)OpenGL\lib\glew32.dll" "$(TargetDir)"
-xcopy /Y /D "$(SolutionDir)OpenGL\lib\glfw3.dll" "$(TargetDir)"
-</Command>
+      <Command>xcopy /E /I /Y "$(ProjectDir)assets" "$(TargetDir)assets"
+xcopy /E /I /Y "$(ProjectDir)shaders" "$(TargetDir)shaders"
+xcopy /Y /D "$(SolutionDir)OpenGL\lib\glew32.dll" "$(TargetDir)"
+xcopy /Y /D "$(SolutionDir)OpenGL\lib\glfw3.dll" "$(TargetDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -148,9 +150,10 @@ xcopy /Y /D "$(SolutionDir)OpenGL\lib\glfw3.dll" "$(TargetDir)"
       <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
-      <Command>xcopy /Y /D "$(SolutionDir)OpenGL\lib\glew32.dll" "$(TargetDir)"
-xcopy /Y /D "$(SolutionDir)OpenGL\lib\glfw3.dll" "$(TargetDir)"
-</Command>
+      <Command>xcopy /E /I /Y "$(ProjectDir)assets" "$(TargetDir)assets"
+xcopy /E /I /Y "$(ProjectDir)shaders" "$(TargetDir)shaders"
+xcopy /Y /D "$(SolutionDir)OpenGL\lib\glew32.dll" "$(TargetDir)"
+xcopy /Y /D "$(SolutionDir)OpenGL\lib\glfw3.dll" "$(TargetDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -173,9 +176,10 @@ xcopy /Y /D "$(SolutionDir)OpenGL\lib\glfw3.dll" "$(TargetDir)"
       <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
-      <Command>xcopy /Y /D "$(SolutionDir)OpenGL\lib\glew32.dll" "$(TargetDir)"
-xcopy /Y /D "$(SolutionDir)OpenGL\lib\glfw3.dll" "$(TargetDir)"
-</Command>
+      <Command>xcopy /E /I /Y "$(ProjectDir)assets" "$(TargetDir)assets"
+xcopy /E /I /Y "$(ProjectDir)shaders" "$(TargetDir)shaders"
+xcopy /Y /D "$(SolutionDir)OpenGL\lib\glew32.dll" "$(TargetDir)"
+xcopy /Y /D "$(SolutionDir)OpenGL\lib\glfw3.dll" "$(TargetDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
