@@ -15,9 +15,20 @@
 
 #include "Shader.h"
 
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+#ifndef HAS_ASSIMP
+#define HAS_ASSIMP 1
+#endif
+
 #include <glm/glm/gtc/matrix_transform.hpp>
 #include <glm/glm/gtc/type_ptr.hpp>
 #include <glm/glm/gtc/constants.hpp>
+
+#include <irrKlang.h>
+#pragma comment(lib, "irrKlang.lib")
+using namespace irrklang;
 
 
 
@@ -75,7 +86,8 @@ enum class IslandBiome : int
     Forest = 0,
     Grassland = 1,
     Snow = 2,
-    Desert = 3
+    Desert = 3,
+    Village = 4
 };
 
 static const char* IslandBiomeName(IslandBiome b)
@@ -86,6 +98,7 @@ static const char* IslandBiomeName(IslandBiome b)
     case IslandBiome::Grassland: return "Grassland";
     case IslandBiome::Snow: return "Snow";
     case IslandBiome::Desert: return "Desert";
+    case IslandBiome::Village: return "Village";
     default: return "Unknown";
     }
 }
@@ -115,6 +128,23 @@ struct GLMesh
     }
 
     void Bind() const { glBindVertexArray(vao); }
+};
+
+struct PrintThrottle
+{
+    float accum = 0.0f;
+
+    // returns true once every `intervalSec`
+    bool Tick(float dt, float intervalSec)
+    {
+        accum += dt;
+        if (accum >= intervalSec)
+        {
+            accum = 0.0f;
+            return true;
+        }
+        return false;
+    }
 };
 
 struct KeyLatch
@@ -423,6 +453,13 @@ public:
             ridgeMul = 0.60f;
             moistureMul = 0.40f;
             break;
+        case IslandBiome::Village:
+            // Flatter terrain with moderate moisture (good for grass + town)
+            heightMul = 0.80f;
+            ridgeMul = 0.55f;
+            moistureMul = 0.95f;
+            baseLift = 0.10f;
+            break;
         }
 
         for (int z = 0; z <= gridSize; z++)
@@ -471,6 +508,21 @@ public:
 
                 m *= moistureMul;
                 m = glm::clamp(m, 0.0f, 1.0f);
+
+				// Village biome gets a flattened area in the center
+                if (islandBiome == IslandBiome::Village)
+                {
+                    float r01 = glm::clamp(glm::length(glm::vec2(wx, wz)) / half, 0.0f, 1.0f);
+
+                    float flatMask = 1.0f - glm::smoothstep(0.75f, 0.92f, r01);
+
+                    float target = seaLevel + 2.2f;
+
+                    // allow a tiny bit of variation
+                    float micro = (fbm(wx * 0.08f, wz * 0.08f, seed + 4242) - 0.5f) * 0.25f;
+
+                    land = glm::mix(land, target + micro, flatMask * 0.95f);
+                }
 
                 Vertex v;
                 v.pos = glm::vec3(wx, land, wz);
@@ -833,6 +885,14 @@ private:
     GLuint vao = 0, vbo = 0;
 };
 
+//  OBJ / Assimp Model
+
+struct PlacedHouse
+{
+    glm::mat4 model = glm::mat4(1.0f);
+    int variant = 0;
+};
+
 //  OBJ Model
 
 struct ModelVertex
@@ -983,6 +1043,118 @@ static bool LoadOBJ_Minimal(const std::string& path,
     std::cout << "Loaded OBJ: " << path << " verts=" << outVerts.size() << " idx=" << outIdx.size() << "\n";
     return !outVerts.empty() && !outIdx.empty();
 }
+
+#if HAS_ASSIMP
+static bool LoadModel_Assimp_AllMeshesMerged(
+    const std::string& path,
+    std::vector<ModelVertex>& outVerts,
+    std::vector<unsigned int>& outIdx)
+{
+    Assimp::Importer importer;
+
+    const aiScene* scene = importer.ReadFile(
+        path,
+        aiProcess_Triangulate |
+        aiProcess_GenNormals |
+        aiProcess_JoinIdenticalVertices |
+        aiProcess_ImproveCacheLocality |
+        aiProcess_OptimizeMeshes |
+        aiProcess_OptimizeGraph |
+        aiProcess_FlipUVs |
+        aiProcess_PreTransformVertices   // IMPORTANT: bakes node transforms into vertices
+    );
+
+    if (!scene || !scene->HasMeshes())
+    {
+        std::cerr << "Assimp failed: " << importer.GetErrorString() << "\n";
+        return false;
+    }
+
+    outVerts.clear();
+    outIdx.clear();
+
+    size_t totalVerts = 0;
+    size_t totalIdx = 0;
+    for (unsigned int mi = 0; mi < scene->mNumMeshes; ++mi)
+    {
+        aiMesh* m = scene->mMeshes[mi];
+        totalVerts += m->mNumVertices;
+        totalIdx += (size_t)m->mNumFaces * 3;
+    }
+    outVerts.reserve(totalVerts);
+    outIdx.reserve(totalIdx);
+
+    unsigned int baseVertex = 0;
+
+    for (unsigned int mi = 0; mi < scene->mNumMeshes; ++mi)
+    {
+        aiMesh* m = scene->mMeshes[mi];
+        if (!m) continue;
+
+        // vertices
+        for (unsigned int i = 0; i < m->mNumVertices; ++i)
+        {
+            ModelVertex v{};
+            v.pos = glm::vec3(m->mVertices[i].x, m->mVertices[i].y, m->mVertices[i].z);
+
+            if (m->HasNormals())
+                v.normal = glm::vec3(m->mNormals[i].x, m->mNormals[i].y, m->mNormals[i].z);
+            else
+                v.normal = glm::vec3(0, 1, 0);
+
+            if (m->HasTextureCoords(0))
+                v.uv = glm::vec2(m->mTextureCoords[0][i].x, m->mTextureCoords[0][i].y);
+            else
+                v.uv = glm::vec2(0, 0);
+
+            outVerts.push_back(v);
+        }
+
+        // indices
+        for (unsigned int f = 0; f < m->mNumFaces; ++f)
+        {
+            const aiFace& face = m->mFaces[f];
+            if (face.mNumIndices != 3) continue;
+
+            outIdx.push_back(baseVertex + face.mIndices[0]);
+            outIdx.push_back(baseVertex + face.mIndices[1]);
+            outIdx.push_back(baseVertex + face.mIndices[2]);
+        }
+
+        baseVertex += m->mNumVertices;
+    }
+
+    std::cout << "Loaded Assimp model (ALL meshes): " << path
+        << " meshes=" << scene->mNumMeshes
+        << " verts=" << outVerts.size()
+        << " idx=" << outIdx.size() << "\n";
+
+    return !outVerts.empty() && !outIdx.empty();
+}
+#endif
+
+
+static bool LoadModelAny_FirstMesh(
+    const std::string& path,
+    std::vector<ModelVertex>& outVerts,
+    std::vector<unsigned int>& outIdx)
+{
+    auto ext = std::filesystem::path(path).extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+    if (ext == ".obj")
+        return LoadOBJ_Minimal(path, outVerts, outIdx);
+
+#if HAS_ASSIMP
+    return LoadModel_Assimp_AllMeshesMerged(path, outVerts, outIdx);
+#else
+
+    std::cerr << "No Assimp: cannot load '" << path << "' (only .obj supported in this build)\n";
+    return false;
+#endif
+}
+
+
 
 struct GLModel
 {
@@ -1184,6 +1356,7 @@ struct Island
     glm::vec2 centerXZ = glm::vec2(0.0f);
     int seed = 0;
     IslandBiome biome = IslandBiome::Forest;
+    std::vector<PlacedHouse> houses;
 
     // Lighthouse (one per island max)
     bool hasLighthouse = false;
@@ -1244,11 +1417,17 @@ class App
     glm::vec3 treePivotMS = glm::vec3(0.0f);
     int   waterLightIdx = -1;
     float waterLightDist = 1e30f;
+    bool debugLH = false;          
+    PrintThrottle lhPrint;
+
 
 
 public:
     bool Init()
     {
+   
+
+
         if (!glfwInit())
         {
             std::cerr << "Failed to init GLFW\n";
@@ -1407,7 +1586,62 @@ public:
 
         }
 
-        RebuildWorld(cfg.seed);
+        
+ 
+        {
+            houseModels.clear();
+            housesLoaded = false;
+
+            const std::vector<std::string> housePaths =
+            {
+                "assets/models/houses/houseA.glb",  // OBJ (your existing minimal loader)
+                "assets/models/houses/houseB.glb",  // GLB (requires Assimp)
+                "assets/models/houses/houseC.glb"   // FBX (requires Assimp)
+            };
+
+            for (const auto& p : housePaths)
+            {
+                std::cout << "Trying house: " << p << "\n";
+                std::cout << "Exists? " << std::filesystem::exists(p) << "\n";
+
+                std::vector<ModelVertex> v;
+                std::vector<unsigned int> i;
+
+                if (LoadModelAny_FirstMesh(p, v, i))
+                {
+                    GLModel m;
+                    m.Upload(v, i);
+                    houseModels.push_back(std::move(m));
+                }
+                else
+                {
+                    std::cerr << "House failed to load: " << p << "\n";
+                }
+            }
+
+            housesLoaded = !houseModels.empty();
+            std::cout << "Houses loaded: " << (housesLoaded ? "YES" : "NO")
+                      << " count=" << houseModels.size()
+                      << " (HAS_ASSIMP=" << HAS_ASSIMP << ")\n";
+        }
+
+        audio = createIrrKlangDevice();
+        if (!audio)
+        {
+            std::cerr << "Failed to start irrKlang.\n";
+            return false;
+        }
+
+        // --- Ambient loops ---
+        oceanLoop = audio->play2D("assets/sfx/ocean.wav", true, false, true); // loop, not paused, track handle
+        if (oceanLoop) oceanLoop->setVolume(0.55f);
+
+        // Storm loop starts silent (we fade it in when stormMode toggles)
+        stormLoop = audio->play2D("assets/sfx/storm_wind.wav", true, false, true);
+        if (stormLoop) stormLoop->setVolume(0.0f);
+
+
+RebuildWorld(cfg.seed);
         tod.speed = cfg.timeSpeed;
 
         std::cout << "\nControls:\n"
@@ -1438,13 +1672,7 @@ public:
 
             fpsTimer += dt;
             frameCount++;
-            if (fpsTimer >= 1.0f)
-            {
-                std::cout << "FPS: " << frameCount << "\n";
-                frameCount = 0;
-                fpsTimer = 0.0f;
-            }
-
+         
             HandleInteraction();
 
             Island* isl = NearestIsland(camera.pos.x, camera.pos.z);
@@ -1492,6 +1720,19 @@ public:
         treeShader.reset();
         lighthouseShader.reset();
 
+        // ---- AUDIO CLEANUP ----
+        for (auto& kv : lighthouseHums)
+        {
+            if (kv.second) { kv.second->stop(); kv.second->drop(); }
+        }
+        lighthouseHums.clear();
+
+        if (oceanLoop) { oceanLoop->stop(); oceanLoop->drop(); oceanLoop = nullptr; }
+        if (stormLoop) { stormLoop->stop(); stormLoop->drop(); stormLoop = nullptr; }
+
+        if (audio) { audio->drop(); audio = nullptr; }
+
+
         if (window) glfwDestroyWindow(window);
         glfwTerminate();
         window = nullptr;
@@ -1500,6 +1741,18 @@ public:
 private:
     GLFWwindow* window = nullptr;
     int width = 1280, height = 720;
+
+    // -------- AUDIO (irrKlang) --------
+    ISoundEngine* audio = nullptr;
+
+    ISound* oceanLoop = nullptr;
+    ISound* stormLoop = nullptr;
+
+    float stormMix = 0.0f; // 0 = calm, 1 = storm
+
+    // looped 3D sounds per lighthouse island
+    std::unordered_map<int, ISound*> lighthouseHums;
+
 
     std::vector<Island> islands;
     WorldConfig cfg;
@@ -1523,6 +1776,8 @@ private:
     GLModel beamModel;
     bool beamLoaded = false;
 
+    std::vector<GLModel> houseModels;
+    bool housesLoaded = false;
 
     GLuint treePaletteTex = 0;
 
@@ -1564,10 +1819,11 @@ private:
         std::uniform_real_distribution<float> u(0.0f, 1.0f);
         float r = u(rng);
 
-        if (r < 0.35f) return IslandBiome::Forest;
-        if (r < 0.60f) return IslandBiome::Grassland;
-        if (r < 0.80f) return IslandBiome::Snow;
-        return IslandBiome::Desert;
+        if (r < 0.30f) return IslandBiome::Forest;
+        if (r < 0.55f) return IslandBiome::Grassland;
+        if (r < 0.70f) return IslandBiome::Snow;
+        if (r < 0.85f) return IslandBiome::Desert;
+        return IslandBiome::Village;
     }
 
     // Pick a coastline-ish position: near edge, not too steep, just above sea level.
@@ -1612,7 +1868,9 @@ private:
         outLocalPos = best;
         outLocalPos.y = t.SampleHeightAtWorldXZ(outLocalPos.x, outLocalPos.z);
         return true;
+
     }
+
 
     void RebuildWorld(int seed)
     {
@@ -1695,7 +1953,77 @@ private:
                 isl.trees.ClearInstances();
             }
 
-            // Lighthouse
+            
+            // -------------------- Village Houses --------------------
+            isl.houses.clear();
+            if (isl.biome == IslandBiome::Village && housesLoaded)
+            {
+                // Place a small village on the flatter mid-band area.
+                std::uniform_real_distribution<float> chance01(0.0f, 1.0f);
+                std::uniform_real_distribution<float> yawR(0.0f, glm::two_pi<float>());
+                std::uniform_real_distribution<float> scaleR(2.0f, 3.0f);
+
+                const int desiredHouses = 8;
+                const int maxTries = desiredHouses * 30;
+                const float minSpacing = 10.0f; // house-to-house spacing in world units
+
+                auto tooClose = [&](const glm::vec3& wpos) -> bool
+                {
+                    for (const auto& h : isl.houses)
+                    {
+                        glm::vec3 p = glm::vec3(h.model[3]);
+                        glm::vec2 d = glm::vec2(wpos.x - p.x, wpos.z - p.z);
+                        if (glm::dot(d, d) < minSpacing * minSpacing) return true;
+                    }
+                    return false;
+                };
+
+                float half = isl.terrain.HalfSize();
+                glm::vec3 worldOffset(isl.centerXZ.x, 0.0f, isl.centerXZ.y);
+
+                std::uniform_real_distribution<float> pickXZ(-half * 0.55f, half * 0.55f);
+
+                for (int tries = 0; tries < maxTries && (int)isl.houses.size() < desiredHouses; tries++)
+                {
+                    float lx = pickXZ(rng);
+                    float lz = pickXZ(rng);
+
+                    // Prefer mid-band plateau (same idea as Terrain flatten mask)
+                    float r01 = glm::clamp(glm::length(glm::vec2(lx, lz)) / half, 0.0f, 1.0f);
+                    if (r01 < 0.20f || r01 > 0.70f) continue;
+
+                    float y = isl.terrain.SampleHeightAtWorldXZ(lx, lz);
+                    glm::vec3 n = isl.terrain.SampleNormalAtWorldXZ(lx, lz);
+
+                    if (n.y < 0.90f) continue; // too steep
+                    if (y < cfg.seaLevel + 1.5f) continue; // avoid coast / low land
+
+                    glm::vec3 posWS = glm::vec3(lx, y, lz) + worldOffset;
+                    if (tooClose(posWS)) continue;
+
+                    // Small chance to skip so villages vary per seed
+                    if (chance01(rng) > 0.35f) continue;
+
+                    float yaw = yawR(rng);
+                    float s = scaleR(rng);
+
+                    glm::mat4 T = glm::translate(glm::mat4(1.0f), posWS);
+                    glm::mat4 R = glm::rotate(glm::mat4(1.0f), yaw, glm::vec3(0, 1, 0));
+                    glm::mat4 S = glm::scale(glm::mat4(1.0f), glm::vec3(s));
+
+                    PlacedHouse ph;
+                    ph.variant = (int)(rng() % (unsigned int)houseModels.size());
+
+// ph.variant = (int)(rng() % (unsigned int)houseModels.size());
+                    ph.model = T * R * S;
+
+                    isl.houses.push_back(ph);
+                }
+
+                std::cout << "Village houses placed: " << isl.houses.size() << "\n";
+            }
+
+// Lighthouse
             isl.hasLighthouse = false;
             if (lighthouseLoaded && chance01(rng) < cfg.lighthouseChancePerIsland)
             {
@@ -1734,12 +2062,23 @@ private:
         {
             cfg.seed = cfg.seed * 1664525 + 1013904223;
             RebuildWorld(cfg.seed);
+            if (audio) audio->play2D("assets/sfx/regen.wav", false);
+
         }
+        static KeyLatch kLHDbg;
+        if (kLHDbg.JustPressed(glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS))
+        {
+            debugLH = !debugLH;
+            std::cout << "debugLH: " << (debugLH ? "ON" : "OFF") << "\n";
+        }
+
 
         if (kFog.JustPressed(glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS))
         {
             cfg.fogEnabled = !cfg.fogEnabled;
             std::cout << "Fog: " << (cfg.fogEnabled ? "ON" : "OFF") << "\n";
+            if (audio) audio->play2D("assets/sfx/ui_click.wav", false);
+
         }
 
         if (kWire.JustPressed(glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS))
@@ -1753,6 +2092,8 @@ private:
         {
             cfg.stormMode = !cfg.stormMode;
             std::cout << "Storm mode: " << (cfg.stormMode ? "ON" : "OFF") << "\n";
+            if (audio) audio->play2D("assets/sfx/thunder_distant.wav", false);
+
         }
         if (kBeamDbg.JustPressed(glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS))
         {
@@ -1763,6 +2104,7 @@ private:
         {
             forceBeamWire = !forceBeamWire;
             std::cout << "ForceBeamWire: " << (forceBeamWire ? "ON" : "OFF") << "\n";
+
         }
 
 
@@ -1787,6 +2129,16 @@ private:
             flatDir.z * cos(glm::radians(tiltDeg))
         ));
 
+        // ---- AUDIO LISTENER UPDATE ----
+        if (audio)
+        {
+            irrklang::vec3df pos(camera.pos.x, camera.pos.y, camera.pos.z);
+            irrklang::vec3df look(camera.front.x, camera.front.y, camera.front.z);
+            irrklang::vec3df up(camera.up.x, camera.up.y, camera.up.z);
+            irrklang::vec3df vel(0, 0, 0); // optional doppler
+
+            audio->setListenerPosition(pos, look, vel, up);
+        }
 
 
         static float prevTime = 0.0f;
@@ -1796,6 +2148,12 @@ private:
 
         float fogDensity = cfg.fogDensity * (cfg.stormMode ? cfg.stormFogMultiplier : 1.0f);
         float waveStrength = cfg.waveStrength * (cfg.stormMode ? cfg.stormWaveMultiplier : 1.0f);
+        // ---- AUDIO STORM CROSSFADE ----
+        float target = cfg.stormMode ? 1.0f : 0.0f;
+        stormMix += (target - stormMix) * glm::clamp(dt * 1.5f, 0.0f, 1.0f);
+
+        if (oceanLoop) oceanLoop->setVolume(0.55f * (1.0f - 0.35f * stormMix));
+        if (stormLoop) stormLoop->setVolume(0.75f * stormMix);
 
         int fbw = 0, fbh = 0;
         glfwGetFramebufferSize(window, &fbw, &fbh);
@@ -1922,24 +2280,26 @@ private:
 
             if (isl.hasLighthouse)
             {
+
                 lhPosWS = isl.lighthousePosWS
                     + glm::vec3(0.0f, cfg.lighthouseLanternHeight * cfg.lighthouseScale, 0.0f);
 
             lhIntensity = lightVis * cfg.lighthouseLightStrength;
 
 
-                if (isl.hasLighthouse) {
-                    float distToCam = glm::length(lhPosWS - camera.pos);
-                    std::cout << "[LH] distToCam=" << distToCam
-                        << " lhIntensity=" << lhIntensity
-                        << " night=" << night
-                        << "\n";
-                }
+            if (isl.hasLighthouse && debugLH && lhPrint.Tick(dt, 1.0f))
+            {
+                float distToCam = glm::length(lhPosWS - camera.pos);
+                std::cout << "[LH] distToCam=" << distToCam
+                    << " lhIntensity=" << lhIntensity
+                    << " night=" << night
+                    << "\n";
+            }
+
 
 
             }
-            std::cout << "LH pos " << lhPosWS.x << "," << lhPosWS.y << "," << lhPosWS.z
-                << " intensity " << lhIntensity << "\n";
+
             // Terrain and lighthouse interaction
             isl.terrain.Draw(*terrainShader, isl.model, view, proj, camera,
                 sunDir, sunCol,
@@ -2135,6 +2495,52 @@ private:
 
 
             }
+
+            // -------------------- Draw village houses --------------------
+            if (housesLoaded && !isl.houses.empty())
+            {
+                glDisable(GL_CULL_FACE); // <--- TEST: fixes missing walls if it's culling
+                // glEnable(GL_CULL_FACE); glCullFace(GL_BACK); // restore after if you want
+
+                Shader& hs = *lighthouseShader;
+                hs.Use();
+                hs.SetMat4("uView", glm::value_ptr(view));
+                hs.SetMat4("uProj", glm::value_ptr(proj));
+                hs.SetVec3("uViewPos", camera.pos.x, camera.pos.y, camera.pos.z);
+
+                hs.SetVec3("uLightDir", sunDir.x, sunDir.y, sunDir.z);
+                hs.SetVec3("uLightColor", sunCol.x, sunCol.y, sunCol.z);
+
+                hs.SetFloat("uAmbientStrength", 0.22f);
+                hs.SetFloat("uSpecStrength", 0.25f);
+                hs.SetFloat("uShininess", 48.0f);
+
+                hs.SetFloat("uFogEnabled", cfg.fogEnabled ? 1.0f : 0.0f);
+                hs.SetVec3("uFogColor", cfg.fogColor.x, cfg.fogColor.y, cfg.fogColor.z);
+                hs.SetFloat("uFogDensity", fogDensity);
+
+                // If your lighthouse.frag expects these, keep them valid:
+                hs.SetFloat("uNightFactor", night);
+                hs.SetVec3("uLanternPosWS", lhPosWS.x, lhPosWS.y, lhPosWS.z);
+                hs.SetVec3("uLanternColor", lhCol.x, lhCol.y, lhCol.z);
+                hs.SetFloat("uLanternIntensity", lhIntensity);
+
+                for (const auto& h : isl.houses)
+                {
+                    int vi = (h.variant >= 0 && h.variant < (int)houseModels.size()) ? h.variant : 0;
+                    hs.SetMat4("uModel", glm::value_ptr(h.model));
+
+                    houseModels[vi].mesh.Bind();
+                    glDrawElements(GL_TRIANGLES, houseModels[vi].mesh.indexCount, GL_UNSIGNED_INT, 0);
+                    glBindVertexArray(0);
+                }
+
+                glEnable(GL_CULL_FACE); // restore if your project uses it elsewhere
+            
+            
+            }
+
+
         }
 
         water.Draw(*waterShader, model, view, proj, camera, sunDir, sunCol,
