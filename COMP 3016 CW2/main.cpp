@@ -374,7 +374,7 @@ public:
 
         return h;
     }
-
+     
     float SampleMoistureAtWorldXZ(float worldX, float worldZ) const
     {
         int idx = SampleIndex(worldX, worldZ);
