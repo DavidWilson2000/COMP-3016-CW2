@@ -71,20 +71,20 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <IncludePath>G:\Assimp\Binaries\include;G:\Assimp\Source\assimp\include;G:\COMP3016\OpenGL\include;$(IncludePath)</IncludePath>
-    <LibraryPath>G:\Assimp\Binaries\lib\Release;G:\COMP3016\OpenGL\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)OpenGL\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)OpenGL\lib</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <IncludePath>G:\Assimp\Binaries\include;G:\Assimp\Source\assimp\include;G:\COMP3016\OpenGL\include;$(IncludePath)</IncludePath>
-    <LibraryPath>G:\Assimp\Binaries\lib\Release;G:\COMP3016\OpenGL\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)OpenGL\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)OpenGL\lib</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <IncludePath>G:\Assimp\Binaries\include;G:\Assimp\Source\assimp\include;G:\COMP3016\OpenGL\include;$(IncludePath)</IncludePath>
-    <LibraryPath>G:\Assimp\Binaries\lib\Release;G:\COMP3016\OpenGL\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)OpenGL\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)OpenGL\lib</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>G:\Assimp\Binaries\include;G:\Assimp\Source\assimp\include;G:\COMP3016\OpenGL\include;$(IncludePath)</IncludePath>
-    <LibraryPath>G:\Assimp\Binaries\lib\Release;G:\COMP3016\OpenGL\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)OpenGL\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)OpenGL\lib</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -107,7 +107,9 @@ if %ERRORLEVEL% LEQ 1 exit 0 else exit %ERRORLEVEL%
 xcopy /E /I /Y "$(ProjectDir)shaders" "$(TargetDir)shaders"
 xcopy /Y /D "$(SolutionDir)OpenGL\lib\glew32.dll" "$(TargetDir)"
 xcopy /Y /D "$(SolutionDir)OpenGL\lib\glfw3.dll" "$(TargetDir)"
-copy /Y "G:\Assimp\bin\x64\assimp-vc143-mt.dll" "$(OutDir)"</Command>
+copy /Y "G:\Assimp\bin\x64\assimp-vc143-mt.dll" "$(OutDir)"
+xcopy /Y /D "$(SolutionDir)OpenGL\lib\assimp-vc143-mt.dll" "$(TargetDir)"
+xcopy /Y /D "$(SolutionDir)OpenGL\lib\irrKlang.dll" "$(TargetDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -135,7 +137,9 @@ if %ERRORLEVEL% LEQ 1 exit 0 else exit %ERRORLEVEL%
 xcopy /E /I /Y "$(ProjectDir)shaders" "$(TargetDir)shaders"
 xcopy /Y /D "$(SolutionDir)OpenGL\lib\glew32.dll" "$(TargetDir)"
 xcopy /Y /D "$(SolutionDir)OpenGL\lib\glfw3.dll" "$(TargetDir)"
-copy /Y "G:\Assimp\bin\x64\assimp-vc143-mt.dll" "$(OutDir)"</Command>
+copy /Y "G:\Assimp\bin\x64\assimp-vc143-mt.dll" "$(OutDir)"
+xcopy /Y /D "$(SolutionDir)OpenGL\lib\assimp-vc143-mt.dll" "$(TargetDir)"
+xcopy /Y /D "$(SolutionDir)OpenGL\lib\irrKlang.dll" "$(TargetDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -159,7 +163,9 @@ if %ERRORLEVEL% LEQ 1 exit 0 else exit %ERRORLEVEL%
 xcopy /E /I /Y "$(ProjectDir)shaders" "$(TargetDir)shaders"
 xcopy /Y /D "$(SolutionDir)OpenGL\lib\glew32.dll" "$(TargetDir)"
 xcopy /Y /D "$(SolutionDir)OpenGL\lib\glfw3.dll" "$(TargetDir)"
-copy /Y "G:\Assimp\bin\x64\assimp-vc143-mt.dll" "$(OutDir)"</Command>
+copy /Y "G:\Assimp\bin\x64\assimp-vc143-mt.dll" "$(OutDir)"
+xcopy /Y /D "$(SolutionDir)OpenGL\lib\assimp-vc143-mt.dll" "$(TargetDir)"
+xcopy /Y /D "$(SolutionDir)OpenGL\lib\irrKlang.dll" "$(TargetDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -187,7 +193,9 @@ if %ERRORLEVEL% LEQ 1 exit 0 else exit %ERRORLEVEL%
 xcopy /E /I /Y "$(ProjectDir)shaders" "$(TargetDir)shaders"
 xcopy /Y /D "$(SolutionDir)OpenGL\lib\glew32.dll" "$(TargetDir)"
 xcopy /Y /D "$(SolutionDir)OpenGL\lib\glfw3.dll" "$(TargetDir)"
-copy /Y "G:\Assimp\bin\x64\assimp-vc143-mt.dll" "$(OutDir)"</Command>
+copy /Y "G:\Assimp\bin\x64\assimp-vc143-mt.dll" "$(OutDir)"
+xcopy /Y /D "$(SolutionDir)OpenGL\lib\assimp-vc143-mt.dll" "$(TargetDir)"
+xcopy /Y /D "$(SolutionDir)OpenGL\lib\irrKlang.dll" "$(TargetDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
