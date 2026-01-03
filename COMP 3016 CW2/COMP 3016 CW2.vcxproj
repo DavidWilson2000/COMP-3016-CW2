@@ -72,19 +72,19 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <IncludePath>$(SolutionDir)OpenGL\include;$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)OpenGL\lib</LibraryPath>
+    <LibraryPath>$(SolutionDir)OpenGL\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <IncludePath>$(SolutionDir)OpenGL\include;$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)OpenGL\lib</LibraryPath>
+    <LibraryPath>$(SolutionDir)OpenGL\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <IncludePath>$(SolutionDir)OpenGL\include;$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)OpenGL\lib</LibraryPath>
+    <LibraryPath>$(SolutionDir)OpenGL\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <IncludePath>$(SolutionDir)OpenGL\include;$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)OpenGL\lib</LibraryPath>
+    <LibraryPath>$(SolutionDir)OpenGL\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -92,14 +92,14 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)OpenGL\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)OpenGL\lib;</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>glfw3.lib;glew32.lib;glew32s.lib;opengl32.lib;assimp-vc143-mt.lib;user32.lib;gdi32.lib;shell32.lib;ole32.lib;winmm.lib;irrKlang.lib</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib\</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib;</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
       <Command>robocopy "$(ProjectDir)assets" "$(TargetDir)assets" /E /R:2 /W:1
@@ -120,7 +120,7 @@ xcopy /Y /D "$(SolutionDir)OpenGL\lib\irrKlang.dll" "$(TargetDir)"</Command>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)OpenGL\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)OpenGL\lib;</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
@@ -129,7 +129,7 @@ xcopy /Y /D "$(SolutionDir)OpenGL\lib\irrKlang.dll" "$(TargetDir)"</Command>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>glfw3.lib;glew32.lib;glew32s.lib;opengl32.lib;assimp-vc143-mt.lib;user32.lib;gdi32.lib;shell32.lib;ole32.lib;winmm.lib;irrKlang.lib</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib\</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib;</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
       <Command>robocopy "$(ProjectDir)assets" "$(TargetDir)assets" /E /R:2 /W:1
@@ -148,14 +148,14 @@ xcopy /Y /D "$(SolutionDir)OpenGL\lib\irrKlang.dll" "$(TargetDir)"</Command>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)OpenGL\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)OpenGL\lib;</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>glfw3.lib;glew32.lib;glew32s.lib;opengl32.lib;assimp-vc143-mt.lib;user32.lib;gdi32.lib;shell32.lib;ole32.lib;winmm.lib;irrKlang.lib</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib\</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib;</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
       <Command>robocopy "$(ProjectDir)assets" "$(TargetDir)assets" /E /R:2 /W:1
@@ -176,7 +176,7 @@ xcopy /Y /D "$(SolutionDir)OpenGL\lib\irrKlang.dll" "$(TargetDir)"</Command>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)OpenGL\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)OpenGL\lib;</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
@@ -185,7 +185,7 @@ xcopy /Y /D "$(SolutionDir)OpenGL\lib\irrKlang.dll" "$(TargetDir)"</Command>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>glfw3.lib;glew32.lib;glew32s.lib;opengl32.lib;assimp-vc143-mt.lib;user32.lib;gdi32.lib;shell32.lib;ole32.lib;winmm.lib;irrKlang.lib</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib\</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib;</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
       <Command>robocopy "$(ProjectDir)assets" "$(TargetDir)assets" /E /R:2 /W:1
@@ -201,10 +201,12 @@ xcopy /Y /D "$(SolutionDir)OpenGL\lib\irrKlang.dll" "$(TargetDir)"</Command>
   <ItemGroup>
     <ClCompile Include="loadpng.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="RingSystem.cpp" />
     <ClCompile Include="Shader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="loadpng.h" />
+    <ClInclude Include="RingSystem.h" />
     <ClInclude Include="Shader.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

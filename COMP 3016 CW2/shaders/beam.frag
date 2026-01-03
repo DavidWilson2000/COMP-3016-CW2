@@ -7,9 +7,8 @@ out vec4 FragColor;
 uniform vec3  uViewPos;
 uniform vec3  uBeamColor;
 uniform float uBeamStrength;
-uniform float uDebugWire; // 1 = show cone no matter what
+uniform float uDebugWire; // 1 = debug cone (use GL_LINE in C++)
 
-// Fog
 uniform float uFogEnabled;
 uniform vec3  uFogColor;
 uniform float uFogDensity;
@@ -23,42 +22,39 @@ void main()
     const float CONE_H = 10.0;
     const float CONE_R = 6.0;
 
-    // y01 = 0 at base (lantern), 1 at far end (tip)
+    // y01 = 0 at base, 1 at tip
     float y01 = clamp(vLocalPos.y / CONE_H, 0.0, 1.0);
 
-    // Correct cone radius: wide at base, narrow at tip
+    // wide at base -> narrow at tip
     float maxR = (1.0 - y01) * CONE_R;
     float r = length(vLocalPos.xz);
 
-    // Inside cone volume with soft rim
+    // inside cone (soft rim)
     float coneInside = 1.0 - smoothstep(maxR * 0.92, maxR, r);
 
-  float ang = atan(vLocalPos.z, vLocalPos.x); // -pi..pi
-float halfAngle = radians(10.0);
+    // beam wedge (angle slice)
+    float ang = atan(vLocalPos.z, vLocalPos.x); // -pi..pi
+    float halfAngle = radians(10.0);
 
-// Step 3: hard cut outside the beam slice
-if (uDebugWire < 0.5)
-{
-    if (abs(ang) > halfAngle) discard;
-}
+    // In debug mode: don't discard, show the whole cone (wire comes from GL_LINE)
+    if (uDebugWire < 0.5)
+    {
+        if (abs(ang) > halfAngle) discard;
+    }
 
-// optional soft edge (you can keep this)
-float wedge = 1.0 - smoothstep(halfAngle, halfAngle * 1.35, abs(ang));
+    float wedge = 1.0 - smoothstep(halfAngle, halfAngle * 1.35, abs(ang));
 
-    // Stronger core, softer edge
-    float core = 1.0 - smoothstep(maxR * 0.05, maxR * 0.75, r);
+    // stronger core, softer edge
+    float core  = 1.0 - smoothstep(maxR * 0.05, maxR * 0.75, r);
 
-    // Fade along beam length so it doesn’t look like a solid “block”
+    // fade along length (strong near base, weaker near tip)
     float along = 1.0 - smoothstep(0.15, 1.0, y01);
 
     float mask = coneInside * wedge * core * along;
 
-if (uDebugWire > 0.5) mask = 1.0;
-
-    // Color + alpha
     vec3 col = uBeamColor * (uBeamStrength * fadeDist) * mask;
 
-    // Optional fog
+    // fog
     if (uFogEnabled > 0.5)
     {
         float f = exp(-uFogDensity * d);
@@ -66,12 +62,16 @@ if (uDebugWire > 0.5) mask = 1.0;
         col = mix(uFogColor, col, f);
     }
 
-float a = (uDebugWire > 0.5) ? 1.0 : (0.55 * fadeDist * mask);
+    // DEBUG: never make it opaque / never force mask=1
+    // This prevents the giant “black box” occluding the world.
+    if (uDebugWire > 0.5)
+    {
+        FragColor = vec4(uBeamColor, 0.35);
+        return;
+    }
 
-  if (uDebugWire < 0.5)
-{
+    float a = 0.55 * fadeDist * mask;
     if (a < 0.01) discard;
-}
 
     FragColor = vec4(col, a);
 }

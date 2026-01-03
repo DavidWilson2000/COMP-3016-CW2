@@ -30,6 +30,9 @@
     <ClCompile Include="loadpng.cpp">
       <Filter>Source Files\Models</Filter>
     </ClCompile>
+    <ClCompile Include="RingSystem.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Shader.h">
@@ -37,6 +40,9 @@
     </ClInclude>
     <ClInclude Include="loadpng.h">
       <Filter>Source Files\Models</Filter>
+    </ClInclude>
+    <ClInclude Include="RingSystem.h">
+      <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

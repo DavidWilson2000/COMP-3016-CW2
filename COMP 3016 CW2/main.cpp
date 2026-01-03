@@ -9,7 +9,10 @@
 #include <sstream>
 #include <unordered_map>
 #include <string>
- 
+#include "RingSystem.h"
+#define STB_IMAGE_IMPLEMENTATION
+#include "stbImage/stb_image.h"
+
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
@@ -110,6 +113,7 @@ struct Vertex
     glm::vec3 pos;
     glm::vec3 normal;
     float moisture = 0.0f;
+    glm::vec2 uv;                
 };
 
 struct GLMesh
@@ -169,13 +173,20 @@ public:
 
     float yaw = -90.0f;
     float pitch = -20.0f;
+    float boostLerp = 1.0f;
 
     void ProcessKeyboard(GLFWwindow* window, float dt, float speedMul)
     {
-        float speed = 10.0f * dt * speedMul;
+
+        float speed = 10.0f * dt * speedMul * boostLerp;
+        float targetBoost = (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) ? 2.2f : 1.0f;
+        boostLerp += (targetBoost - boostLerp) * glm::clamp(dt * 6.0f, 0.0f, 1.0f);
+
 
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) pos += speed * front;
         if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) pos -= speed * front;
+        if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) pos.y += speed;
+      
 
         glm::vec3 right = glm::normalize(glm::cross(front, up));
         if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) pos -= speed * right;
@@ -529,6 +540,9 @@ public:
                 v.normal = glm::vec3(0, 1, 0);
                 v.moisture = m;
 
+                const float uvScale = 0.05f;              
+                v.uv = glm::vec2(wx, wz) * uvScale;
+
                 verts.push_back(v);
                 maxHeight = std::max(maxHeight, land);
             }
@@ -573,7 +587,8 @@ public:
         float lhIntensity,
         const glm::vec3& beamDirWS,
         float beamInnerCos,
-        float beamOuterCos)
+        float beamOuterCos,
+        float beamRange)
     {
         shader.Use();
         shader.SetMat4("uModel", glm::value_ptr(model));
@@ -604,7 +619,9 @@ public:
         shader.SetVec3("uBeamDir", beamDirWS.x, beamDirWS.y, beamDirWS.z);
         shader.SetFloat("uBeamInnerCos", beamInnerCos);
         shader.SetFloat("uBeamOuterCos", beamOuterCos);
+        shader.SetFloat("uBeamRange", beamRange);
 
+     
 
         mesh.Bind();
         glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, 0);
@@ -679,6 +696,10 @@ private:
 
         glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, moisture));
         glEnableVertexAttribArray(2);
+        
+        glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, uv));
+        glEnableVertexAttribArray(3);
+
 
         glBindVertexArray(0);
 
@@ -707,10 +728,19 @@ public:
 
         verts.reserve((grid + 1) * (grid + 1));
         idx.reserve(grid * grid * 6);
-
         for (int z = 0; z <= grid; z++)
+        {
             for (int x = 0; x <= grid; x++)
-                verts.push_back({ {x * spacing - half, y, z * spacing - half}, {0,1,0}, 0.0f });
+            {
+                Vertex vv;
+                vv.pos = glm::vec3(x * spacing - half, y, z * spacing - half);
+                vv.normal = glm::vec3(0.0f, 1.0f, 0.0f);
+                vv.moisture = 0.0f;
+                vv.uv = glm::vec2((float)x, (float)z) * 0.05f; // harmless if water shader ignores
+                verts.push_back(vv);
+            }
+        }
+
 
         for (int z = 0; z < grid; z++)
         {
@@ -750,7 +780,9 @@ public:
         float lhIntensity,
         const glm::vec3& beamDirWS,
         float beamInnerCos,
-        float beamOuterCos)
+        float beamOuterCos,
+        float beamRange) 
+
 
     {
         shader.Use();
@@ -781,7 +813,7 @@ public:
         shader.SetVec3("uBeamDir", beamDirWS.x, beamDirWS.y, beamDirWS.z);
         shader.SetFloat("uBeamInnerCos", beamInnerCos);
         shader.SetFloat("uBeamOuterCos", beamOuterCos);
-
+        shader.SetFloat("uBeamRange", beamRange);
 
         mesh.Bind();
         glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, 0);
@@ -1405,12 +1437,49 @@ static void BuildConeModel(GLModel& out, float height, float radius, int sides)
 
     out.Upload(v, idx);
 }
+static GLuint LoadTexture2D(const char* path, bool srgb = false)
+{
+    int w, h, n;
+    stbi_set_flip_vertically_on_load(true);
+    unsigned char* data = stbi_load(path, &w, &h, &n, 0);
+    if (!data)
+    {
+        std::cerr << "Failed to load texture: " << path << "\n";
+        return 0;
+    }
+
+    GLenum format = (n == 4) ? GL_RGBA : GL_RGB;
+    GLenum internalFormat = format;
+    if (srgb)
+    {
+        internalFormat = (format == GL_RGBA) ? GL_SRGB8_ALPHA8 : GL_SRGB8;
+    }
+
+    GLuint tex = 0;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, w, h, 0, format, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+    stbi_image_free(data);
+    return tex;
+}
 
 
 // App
 
 class App
 {
+    RingSystem rings;
+    int lastDisplayedScore = -1;
     float treeModelMinY = 0.0f;
     float treeModelMaxY = 1.0f;
     float treeTrunkMinY = 0.0f;
@@ -1489,11 +1558,47 @@ public:
         treeShader = std::make_unique<Shader>("shaders/tree.vert", "shaders/tree.frag");
         lighthouseShader = std::make_unique<Shader>("shaders/lighthouse.vert", "shaders/lighthouse.frag");
         beamShader = std::make_unique<Shader>("shaders/beam.vert", "shaders/beam.frag");
+        ringShader = std::make_unique<Shader>("shaders/ring.vert", "shaders/ring.frag"); 
+        hudShader = std::make_unique<Shader>("shaders/hud.vert", "shaders/hud.frag");
+
+        // Fullscreen quad in NDC (covers whole screen)
+        float quad[] =
+        {
+            // pos.x pos.y   uv.x uv.y
+            -1.0f, -1.0f,    0.0f, 0.0f,
+             1.0f, -1.0f,    1.0f, 0.0f,
+             1.0f,  1.0f,    1.0f, 1.0f,
+
+            -1.0f, -1.0f,    0.0f, 0.0f,
+             1.0f,  1.0f,    1.0f, 1.0f,
+            -1.0f,  1.0f,    0.0f, 1.0f
+        };
+
+        glGenVertexArrays(1, &hudVAO);
+        glGenBuffers(1, &hudVBO);
+
+        glBindVertexArray(hudVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, hudVBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
+
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+
+        glBindVertexArray(0);
+
+
         std::cout << "beamShader linkedOk=" << beamShader->linkedOk << " ID=" << beamShader->ID << "\n";
+
 
 
         sky.Build();
 
+        rings.InitMesh();                 
+        rings.SetPointsPerRing(10);
+        rings.SetCollectRadius(2.5f);
         treePaletteTex = CreateTreePaletteTexture_3x3();
         if (!treePaletteTex)
             std::cerr << "Tree palette texture failed to create.\n";
@@ -1636,9 +1741,29 @@ public:
         oceanLoop = audio->play2D("assets/sfx/ocean.wav", true, false, true); // loop, not paused, track handle
         if (oceanLoop) oceanLoop->setVolume(0.55f);
 
-        // Storm loop starts silent (we fade it in when stormMode toggles)
+        // Storm loop starts silent 
         stormLoop = audio->play2D("assets/sfx/storm_wind.wav", true, false, true);
         if (stormLoop) stormLoop->setVolume(0.0f);
+       
+        // ---- Terrain textures ----
+        texSand = LoadTexture2D("assets/textures/sand.png");
+        texGrass = LoadTexture2D("assets/textures/grass.png");
+        texRock = LoadTexture2D("assets/textures/rock.png");
+        texSnow = LoadTexture2D("assets/textures/snow.png");
+        texRing = LoadTexture2D("assets/textures/ring.png");
+        texHelp = LoadTexture2D("assets/textures/help.png");
+        if (!texHelp)
+        {
+            std::cerr << "Help overlay texture failed to load.\n";
+        }
+
+
+
+        if (!texSand || !texGrass || !texRock || !texSnow)
+        {
+            std::cerr << "One or more terrain textures failed to load.\n";
+            useTextures = false; // fallback to procedural color
+        }
 
 
 RebuildWorld(cfg.seed);
@@ -1650,7 +1775,7 @@ RebuildWorld(cfg.seed);
             << "  F: toggle fog\n"
             << "  P: toggle wireframe\n"
             << "  O: toggle storm mode\n"
-            << "  B: toggle ForceBeamDebug\n"
+            << "  B: toggle Beam (visible cone)\n"
             << "  ESC: quit\n\n";
 
 
@@ -1690,6 +1815,22 @@ RebuildWorld(cfg.seed);
             camera.ProcessKeyboard(window, dt, speedMul);
             tod.Update(dt);
 
+            int got = rings.UpdateCollect(camera.pos);
+            if (got > 0 && audio)
+            {
+                audio->play2D("assets/sfx/ring_collect.wav");
+            }
+
+            // update title when score changes (cheap “UI”)
+            int score = rings.GetScore();
+            if (score != lastDisplayedScore)
+            {
+                lastDisplayedScore = score;
+                std::string title = "Procedural Island - Score: " + std::to_string(score) +
+                    " (" + std::to_string(rings.GetCollected()) + "/" + std::to_string(rings.GetTotal()) + ")";
+                glfwSetWindowTitle(window, title.c_str());
+            }
+
             Render(now);
 
             glfwSwapBuffers(window);
@@ -1714,11 +1855,29 @@ RebuildWorld(cfg.seed);
         if (treePaletteTex) glDeleteTextures(1, &treePaletteTex);
         treePaletteTex = 0;
 
+        ringShader.reset();
         terrainShader.reset();
         skyShader.reset();
         waterShader.reset();
         treeShader.reset();
         lighthouseShader.reset();
+
+        if (texHelp) glDeleteTextures(1, &texHelp);
+        texHelp = 0;
+
+        if (hudVBO) glDeleteBuffers(1, &hudVBO);
+        if (hudVAO) glDeleteVertexArrays(1, &hudVAO);
+        hudVBO = hudVAO = 0;
+
+        hudShader.reset();
+
+		// ---- TEXTURE CLEANUP ----
+        if (texSand)  glDeleteTextures(1, &texSand);
+        if (texGrass) glDeleteTextures(1, &texGrass);
+        if (texRock)  glDeleteTextures(1, &texRock);
+        if (texSnow)  glDeleteTextures(1, &texSnow);
+        if (texRing) glDeleteTextures(1, &texRing);  
+        texSand = texGrass = texRock = texSnow = texRing = 0;
 
         // ---- AUDIO CLEANUP ----
         for (auto& kv : lighthouseHums)
@@ -1753,6 +1912,18 @@ private:
     // looped 3D sounds per lighthouse island
     std::unordered_map<int, ISound*> lighthouseHums;
 
+    // --- HUD overlay ---
+    std::unique_ptr<Shader> hudShader;
+    GLuint hudVAO = 0, hudVBO = 0;
+    GLuint texHelp = 0;
+
+    KeyLatch kHelp;
+    bool showHelp = false;
+
+
+    GLuint texSand = 0, texGrass = 0, texRock = 0, texSnow = 0; GLuint texRing = 0;
+    float texTiling = 0.08f;
+    bool useTextures = true;
 
     std::vector<Island> islands;
     WorldConfig cfg;
@@ -1765,6 +1936,8 @@ private:
 
     std::unique_ptr<Shader> terrainShader, skyShader, waterShader, treeShader;
     std::unique_ptr<Shader> lighthouseShader, beamShader;
+    std::unique_ptr<Shader> ringShader;
+
 
 
     GLModel treeModel;
@@ -1787,7 +1960,7 @@ private:
     bool forceBeamDebug = true; 
 
     KeyLatch kBeamWire;
-    bool forceBeamWire = true;
+    bool forceBeamWire = false;
 
 
     float fpsTimer = 0.0f;
@@ -1878,7 +2051,7 @@ private:
 
         water.y = cfg.seaLevel + cfg.waveStrength * 0.6f + 0.10f;
         water.BuildFromWorldSize(cfg.oceanHalfSize, cfg.waterSpacing);
-
+        rings.Reset();
         islands.clear();
         islands.resize(cfg.islandCount);
 
@@ -1938,6 +2111,24 @@ private:
             isl.terrain.Build(cfg.terrainGrid, cfg.terrainSpacing, isl.seed, isl.biome);
 
             isl.model = glm::translate(glm::mat4(1.0f), glm::vec3(pos.x, 0.0f, pos.y));
+
+            // Spawn rings for this island
+            int ringCount = 6;
+            if (isl.biome == IslandBiome::Village) ringCount = 10;
+            if (isl.biome == IslandBiome::Snow)    ringCount = 7;
+
+            rings.SpawnForIsland(
+                i,
+                isl.centerXZ,
+                isl.terrain.HalfSize(),
+                ringCount,
+                cfg.seed,
+                // height sampler (local xz)
+                [&](float lx, float lz) { return isl.terrain.SampleHeightAtWorldXZ(lx, lz); },
+                // normal sampler (local xz)
+                [&](float lx, float lz) { return isl.terrain.SampleNormalAtWorldXZ(lx, lz); }
+            );
+
 
             // Trees
             bool spawnTrees = (isl.biome == IslandBiome::Forest) || (isl.biome == IslandBiome::Grassland);
@@ -2058,6 +2249,13 @@ private:
 
     void HandleInteraction()
     {
+        if (kHelp.JustPressed(glfwGetKey(window, GLFW_KEY_H) == GLFW_PRESS))
+        {
+            showHelp = !showHelp;
+            std::cout << "Help overlay: " << (showHelp ? "ON" : "OFF") << "\n";
+            if (audio) audio->play2D("assets/sfx/ui_click.wav", false);
+        }
+
         if (kRegen.JustPressed(glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS))
         {
             cfg.seed = cfg.seed * 1664525 + 1013904223;
@@ -2086,6 +2284,12 @@ private:
             wireframe = !wireframe;
             glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
             std::cout << "Wireframe: " << (wireframe ? "ON" : "OFF") << "\n";
+           
+        }
+        if (kBeamWire.JustPressed(glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS))
+        {
+            forceBeamWire = !forceBeamWire;
+            std::cout << "ForceBeamWire: " << (forceBeamWire ? "ON" : "OFF") << "\n";
         }
 
         if (kStorm.JustPressed(glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS))
@@ -2095,18 +2299,6 @@ private:
             if (audio) audio->play2D("assets/sfx/thunder_distant.wav", false);
 
         }
-        if (kBeamDbg.JustPressed(glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS))
-        {
-            forceBeamDebug = !forceBeamDebug;
-            std::cout << "ForceBeamDebug: " << (forceBeamDebug ? "ON" : "OFF") << "\n";
-        }
-        if (kBeamWire.JustPressed(glfwGetKey(window, GLFW_KEY_V) == GLFW_PRESS))
-        {
-            forceBeamWire = !forceBeamWire;
-            std::cout << "ForceBeamWire: " << (forceBeamWire ? "ON" : "OFF") << "\n";
-
-        }
-
 
     }
 
@@ -2117,17 +2309,17 @@ private:
 
         float innerCos = glm::cos(glm::radians(12.0f));
         float outerCos = glm::cos(glm::radians(20.0f));
+
         float spin = timeSeconds * cfg.lighthouseBeamSpinSpeed;
-        // Horizontal spin direction
         glm::vec3 flatDir = glm::normalize(glm::vec3(cos(spin), 0.0f, sin(spin)));
 
-        // Constant downward tilt (negative Y)
         const float tiltDeg = 18.0f;
         glm::vec3 beamDir = glm::normalize(glm::vec3(
             flatDir.x * cos(glm::radians(tiltDeg)),
             -sin(glm::radians(tiltDeg)),
             flatDir.z * cos(glm::radians(tiltDeg))
         ));
+        float beamRange = cfg.lighthouseBeamLength * 8.0f;
 
         // ---- AUDIO LISTENER UPDATE ----
         if (audio)
@@ -2135,11 +2327,9 @@ private:
             irrklang::vec3df pos(camera.pos.x, camera.pos.y, camera.pos.z);
             irrklang::vec3df look(camera.front.x, camera.front.y, camera.front.z);
             irrklang::vec3df up(camera.up.x, camera.up.y, camera.up.z);
-            irrklang::vec3df vel(0, 0, 0); // optional doppler
-
+            irrklang::vec3df vel(0, 0, 0);
             audio->setListenerPosition(pos, look, vel, up);
         }
-
 
         static float prevTime = 0.0f;
         float dt = timeSeconds - prevTime;
@@ -2148,6 +2338,7 @@ private:
 
         float fogDensity = cfg.fogDensity * (cfg.stormMode ? cfg.stormFogMultiplier : 1.0f);
         float waveStrength = cfg.waveStrength * (cfg.stormMode ? cfg.stormWaveMultiplier : 1.0f);
+
         // ---- AUDIO STORM CROSSFADE ----
         float target = cfg.stormMode ? 1.0f : 0.0f;
         stormMix += (target - stormMix) * glm::clamp(dt * 1.5f, 0.0f, 1.0f);
@@ -2175,33 +2366,25 @@ private:
         glm::mat4 view = camera.ViewMatrix();
         glm::mat4 proj = glm::perspective(glm::radians(60.f),
             (float)width / (float)height, 2.0f, 5000.f);
-
         glm::mat4 model(1.0f);
 
         sky.Draw(*skyShader, view, proj, sunDir, tod.t01);
 
         float night = NightFactor(tod.t01);
 
-       
         float beamVis = 1.0f;
-
-
         float lightVis = 1.0f;
 
-
-        // Lighthouse light color 
+        // Lighthouse light color
         glm::vec3 lhCol(1.0f, 0.95f, 0.80f);
 
-       
-   // Pick one lighthouse to affect the whole water 
-  
+    
         glm::vec3 waterLhPosWS(0.0f, -99999.0f, 0.0f);
         float waterLhIntensity = 0.0f;
 
         int bestIdx = -1;
         float bestD = 1e30f;
 
-        // find closest lighthouse this frame
         for (int i = 0; i < (int)islands.size(); i++)
         {
             auto& isl = islands[i];
@@ -2235,81 +2418,394 @@ private:
                 waterLightDist = bestD;
             }
         }
-
-        // output uniforms from the chosen lighthouse
-        if (waterLightIdx != -1 && islands[waterLightIdx].hasLighthouse)
-        {
-            glm::vec3 lhPosWS = islands[waterLightIdx].lighthousePosWS
-                + glm::vec3(0.0f, cfg.lighthouseLanternHeight * cfg.lighthouseScale, 0.0f);
-
-            waterLhPosWS = lhPosWS;
-            waterLhIntensity = lightVis * cfg.lighthouseLightStrength;
-        }
-
-       
-
-
-
+      
+        // -------------------------
+        // Aim helper (unchanged)
+        // -------------------------
         auto AimMatrixFromDirY = [](const glm::vec3& dir) -> glm::mat4
             {
-                glm::vec3 up = glm::normalize(dir);          
-                glm::vec3 ref(0.0f, 0.0f, 1.0f);            
-
-                // if ref is too close to up, pick another ref
+                glm::vec3 up = glm::normalize(dir);
+                glm::vec3 ref(0.0f, 0.0f, 1.0f);
                 if (fabs(glm::dot(up, ref)) > 0.98f) ref = glm::vec3(1.0f, 0.0f, 0.0f);
 
                 glm::vec3 right = glm::normalize(glm::cross(ref, up));
                 glm::vec3 fwd = glm::normalize(glm::cross(up, right));
 
                 glm::mat4 R(1.0f);
-                // columns: right (X), up (Y), forward (Z)
                 R[0] = glm::vec4(right, 0.0f);
                 R[1] = glm::vec4(up, 0.0f);
                 R[2] = glm::vec4(fwd, 0.0f);
                 return R;
             };
 
-
+        // ============================================================
+        // 1) OPAQUE WORLD FIRST (terrain / houses / lighthouse)
+        // ============================================================
         for (auto& isl : islands)
         {
             float islandBiomeId = (float)(int)isl.biome;
 
-            // Per-island lighthouse light inputs 
             glm::vec3 lhPosWS(0.0f, -99999.0f, 0.0f);
             float lhIntensity = 0.0f;
 
             if (isl.hasLighthouse)
             {
-
                 lhPosWS = isl.lighthousePosWS
                     + glm::vec3(0.0f, cfg.lighthouseLanternHeight * cfg.lighthouseScale, 0.0f);
 
-            lhIntensity = lightVis * cfg.lighthouseLightStrength;
+                lhIntensity = lightVis * cfg.lighthouseLightStrength;
 
-
-            if (isl.hasLighthouse && debugLH && lhPrint.Tick(dt, 1.0f))
-            {
-                float distToCam = glm::length(lhPosWS - camera.pos);
-                std::cout << "[LH] distToCam=" << distToCam
-                    << " lhIntensity=" << lhIntensity
-                    << " night=" << night
-                    << "\n";
+                if (isl.hasLighthouse && debugLH && lhPrint.Tick(dt, 1.0f))
+                {
+                    float distToCam = glm::length(lhPosWS - camera.pos);
+                    std::cout << "[LH] distToCam=" << distToCam
+                        << " lhIntensity=" << lhIntensity
+                        << " night=" << night
+                        << "\n";
+                }
             }
 
+            // ---- TERRAIN ----
+            terrainShader->Use();
 
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, texSand);
+            terrainShader->SetInt("uTexSand", 0);
 
-            }
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, texGrass);
+            terrainShader->SetInt("uTexGrass", 1);
 
-            // Terrain and lighthouse interaction
+            glActiveTexture(GL_TEXTURE2);
+            glBindTexture(GL_TEXTURE_2D, texRock);
+            terrainShader->SetInt("uTexRock", 2);
+
+            glActiveTexture(GL_TEXTURE3);
+            glBindTexture(GL_TEXTURE_2D, texSnow);
+            terrainShader->SetInt("uTexSnow", 3);
+
+            terrainShader->SetFloat("uTexTiling", texTiling);
+            terrainShader->SetFloat("uUseTextures", useTextures ? 1.0f : 0.0f);
+
             isl.terrain.Draw(*terrainShader, isl.model, view, proj, camera,
                 sunDir, sunCol,
                 cfg.fogEnabled, cfg.fogColor, fogDensity,
                 islandBiomeId,
                 (float)isl.seed,
                 lhPosWS, lhCol, lhIntensity,
-                beamDir, innerCos, outerCos);
+                beamDir, innerCos, outerCos,
+                beamRange);
 
-            // Trees and lighthouse interaction
+            // ---- LIGHTHOUSE MODEL (OPAQUE) ----
+            if (lighthouseLoaded && isl.hasLighthouse)
+            {
+                lighthouseShader->Use();
+                lighthouseShader->SetMat4("uModel", glm::value_ptr(isl.lighthouseModel));
+                lighthouseShader->SetMat4("uView", glm::value_ptr(view));
+                lighthouseShader->SetMat4("uProj", glm::value_ptr(proj));
+
+                lighthouseShader->SetVec3("uViewPos", camera.pos.x, camera.pos.y, camera.pos.z);
+                lighthouseShader->SetVec3("uLightDir", sunDir.x, sunDir.y, sunDir.z);
+                lighthouseShader->SetVec3("uLightColor", sunCol.x, sunCol.y, sunCol.z);
+
+                lighthouseShader->SetFloat("uAmbientStrength", 0.22f);
+                lighthouseShader->SetFloat("uSpecStrength", 0.35f);
+                lighthouseShader->SetFloat("uShininess", 64.0f);
+
+                lighthouseShader->SetFloat("uFogEnabled", cfg.fogEnabled ? 1.0f : 0.0f);
+                lighthouseShader->SetVec3("uFogColor", cfg.fogColor.x, cfg.fogColor.y, cfg.fogColor.z);
+                lighthouseShader->SetFloat("uFogDensity", fogDensity);
+
+                lighthouseShader->SetFloat("uNightFactor", night);
+                lighthouseShader->SetVec3("uLanternPosWS", lhPosWS.x, lhPosWS.y, lhPosWS.z);
+                lighthouseShader->SetVec3("uLanternColor", lhCol.x, lhCol.y, lhCol.z);
+                lighthouseShader->SetFloat("uLanternIntensity", lhIntensity);
+
+                lighthouseModel.mesh.Bind();
+                glDrawElements(GL_TRIANGLES, lighthouseModel.mesh.indexCount, GL_UNSIGNED_INT, 0);
+                glBindVertexArray(0);
+            }
+
+            // ---- HOUSES (OPAQUE) ----
+            if (housesLoaded && !isl.houses.empty())
+            {
+                GLboolean wasCull = glIsEnabled(GL_CULL_FACE);
+                glDisable(GL_CULL_FACE);
+
+                Shader& hs = *lighthouseShader;
+                hs.Use();
+                hs.SetMat4("uView", glm::value_ptr(view));
+                hs.SetMat4("uProj", glm::value_ptr(proj));
+                hs.SetVec3("uViewPos", camera.pos.x, camera.pos.y, camera.pos.z);
+
+                hs.SetVec3("uLightDir", sunDir.x, sunDir.y, sunDir.z);
+                hs.SetVec3("uLightColor", sunCol.x, sunCol.y, sunCol.z);
+
+                hs.SetFloat("uAmbientStrength", 0.22f);
+                hs.SetFloat("uSpecStrength", 0.25f);
+                hs.SetFloat("uShininess", 48.0f);
+
+                hs.SetFloat("uFogEnabled", cfg.fogEnabled ? 1.0f : 0.0f);
+                hs.SetVec3("uFogColor", cfg.fogColor.x, cfg.fogColor.y, cfg.fogColor.z);
+                hs.SetFloat("uFogDensity", fogDensity);
+
+                hs.SetFloat("uNightFactor", night);
+                hs.SetVec3("uLanternPosWS", lhPosWS.x, lhPosWS.y, lhPosWS.z);
+                hs.SetVec3("uLanternColor", lhCol.x, lhCol.y, lhCol.z);
+                hs.SetFloat("uLanternIntensity", lhIntensity);
+
+                for (const auto& h : isl.houses)
+                {
+                    int vi = (h.variant >= 0 && h.variant < (int)houseModels.size()) ? h.variant : 0;
+                    hs.SetMat4("uModel", glm::value_ptr(h.model));
+
+                    houseModels[vi].mesh.Bind();
+                    glDrawElements(GL_TRIANGLES, houseModels[vi].mesh.indexCount, GL_UNSIGNED_INT, 0);
+                    glBindVertexArray(0);
+                }
+
+                if (wasCull) glEnable(GL_CULL_FACE);
+                else glDisable(GL_CULL_FACE);
+            }
+        }
+
+        waterShader->Use();
+        waterShader->SetFloat("uAdditiveOnly", 0.0f);
+
+// BASE WATER 
+        water.Draw(*waterShader, model, view, proj, camera, sunDir, sunCol,
+            timeSeconds, waveStrength, cfg.waveSpeed,
+            cfg.fogEnabled, cfg.fogColor, fogDensity,
+            glm::vec3(0.0f, -99999.0f, 0.0f), lhCol, 0.0f,
+            beamDir, innerCos, outerCos,
+            beamRange);
+
+
+
+        // ADD ALL LIGHTHOUSES CONTRIBUTION (water) - normalized + distance faded
+        int lhCount = 0;
+        for (auto& isl : islands) if (isl.hasLighthouse) lhCount++;
+
+        if (lhCount > 0)
+        {
+            //  debug throttle (prints once per ~1 second) 
+            static float waterDbgAccum = 0.0f;
+            waterDbgAccum += dt;
+            bool doDbg = (waterDbgAccum >= 1.0f);
+            if (doDbg) waterDbgAccum = 0.0f;
+
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ONE, GL_ONE);
+
+            // additive pass should not write depth
+            glDepthMask(GL_FALSE);
+
+            // IMPORTANT: EQUAL is too fragile for animated water; use LEQUAL
+            glDepthFunc(GL_LEQUAL);
+
+            waterShader->Use();
+            waterShader->SetFloat("uAdditiveOnly", 1.0f);
+
+            // kill sun lighting during additive passes
+            waterShader->SetFloat("uAmbientStrength", 0.0f);
+            waterShader->SetFloat("uSpecStrength", 0.0f);
+			waterShader->SetVec3("uLightColor", 0.0f, 0.0f, 0.0f);
+
+          
+            float globalWaterLhMul = 1.25f;  
+            float perLightNorm = 1.0f;        
+
+           
+            float fadeStart = 250.0f;
+            float fadeEnd = 1500.0f;
+
+
+     
+            int printed = 0;
+
+            for (int i = 0; i < (int)islands.size(); i++)
+            {
+                auto& isl = islands[i];
+                if (!isl.hasLighthouse) continue;
+
+                glm::vec3 lhPosWS = isl.lighthousePosWS
+                    + glm::vec3(0.0f, cfg.lighthouseLanternHeight * cfg.lighthouseScale, 0.0f);
+
+                float d = glm::length(lhPosWS - camera.pos);
+
+                // 1 near, 0 far
+                float fade = 1.0f - glm::smoothstep(fadeStart, fadeEnd, d);
+                fade = glm::clamp(fade, 0.0f, 1.0f);
+               
+                float lhIntensity =
+                    cfg.lighthouseLightStrength *
+                    globalWaterLhMul *
+                    fade;   
+
+
+
+
+                if (doDbg && printed == 0)
+                {
+                    std::cout
+                        << "[WATER-LH] islandIndex=" << i
+                        << " lhCount=" << lhCount
+                        << " d=" << d
+                        << " fade=" << fade
+                        << " perLightNorm=" << perLightNorm
+                        << " lhIntensity=" << lhIntensity
+                        << " beamRange=" << beamRange
+                        << "\n";
+                    printed++;
+                }
+
+                water.Draw(*waterShader, model, view, proj, camera, sunDir, sunCol,
+                    timeSeconds, waveStrength, cfg.waveSpeed,
+                    cfg.fogEnabled, cfg.fogColor, fogDensity,
+                    lhPosWS, lhCol, lhIntensity,
+                    beamDir, innerCos, outerCos,
+                    beamRange);
+            }
+
+            // Optional GL error check (prints only when an error occurs)
+            GLenum err = glGetError();
+            if (err != GL_NO_ERROR)
+            {
+                std::cout << "[WATER-LH] GL error after additive pass: " << err << "\n";
+            }
+
+            // restore state
+            glDepthFunc(GL_LESS);
+            glDepthMask(GL_TRUE);
+            glDisable(GL_BLEND);
+        }
+
+
+
+        // -------------------- BEAM DRAW (with debug wire toggle) --------------------
+        if (beamLoaded && beamShader && beamShader->linkedOk)
+        {
+            // Beam should not “cut out” the scene
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+            glEnable(GL_DEPTH_TEST);
+            glDepthMask(GL_FALSE);
+            glDepthFunc(GL_LEQUAL);
+
+            // Beam cones often need no culling (inside/outside viewing)
+            GLboolean wasCull = glIsEnabled(GL_CULL_FACE);
+            glDisable(GL_CULL_FACE);
+
+            // Save polygon mode and set wire only for beam
+            GLint prevMode[2];
+            glGetIntegerv(GL_POLYGON_MODE, prevMode);
+            glPolygonMode(GL_FRONT_AND_BACK, forceBeamWire ? GL_LINE : GL_FILL);
+
+            for (auto& isl : islands)
+            {
+                if (!isl.hasLighthouse) continue;
+
+                glm::vec3 lhPosWS = isl.lighthousePosWS
+                    + glm::vec3(0.0f, cfg.lighthouseLanternHeight * cfg.lighthouseScale, 0.0f);
+
+      
+                float scaleY = (cfg.lighthouseBeamLength) / 10.0f;   
+                float scaleR = (cfg.lighthouseBeamRadius) / 6.0f;    
+
+                glm::mat4 T = glm::translate(glm::mat4(1.0f), lhPosWS);
+
+            
+                glm::mat4 R = AimMatrixFromDirY(beamDir);
+
+                glm::mat4 S = glm::scale(glm::mat4(1.0f), glm::vec3(scaleR, scaleY, scaleR));
+                glm::mat4 beamM = T * R * S;
+
+                beamShader->Use();
+                beamShader->SetMat4("uModel", glm::value_ptr(beamM));
+                beamShader->SetMat4("uView", glm::value_ptr(view));
+                beamShader->SetMat4("uProj", glm::value_ptr(proj));
+
+                // REQUIRED uniforms (this is what fixes the black box)
+                beamShader->SetVec3("uViewPos", camera.pos.x, camera.pos.y, camera.pos.z);
+                beamShader->SetVec3("uBeamColor", lhCol.x, lhCol.y, lhCol.z);
+                beamShader->SetFloat("uBeamStrength", cfg.lighthouseBeamStrength);
+
+                // THIS is the debug toggle your shader uses
+                beamShader->SetFloat("uDebugWire", forceBeamWire ? 1.0f : 0.0f);
+
+
+
+                // Fog uniforms used by beam.frag
+                beamShader->SetFloat("uFogEnabled", cfg.fogEnabled ? 1.0f : 0.0f);
+                beamShader->SetVec3("uFogColor", cfg.fogColor.x, cfg.fogColor.y, cfg.fogColor.z);
+                beamShader->SetFloat("uFogDensity", fogDensity);
+
+                beamModel.mesh.Bind();
+                glDrawElements(GL_TRIANGLES, beamModel.mesh.indexCount, GL_UNSIGNED_INT, 0);
+                glBindVertexArray(0);
+            }
+
+            // Restore state
+            glPolygonMode(GL_FRONT_AND_BACK, prevMode[0]);
+
+            if (wasCull) glEnable(GL_CULL_FACE);
+            else glDisable(GL_CULL_FACE);
+
+            glDepthFunc(GL_LESS);
+            glDepthMask(GL_TRUE);
+            glDisable(GL_BLEND);
+        }
+
+
+
+        // ============================================================
+        // 3) TRANSPARENT: RINGS, TREES, BEAM
+        // ============================================================
+
+        // ---- RINGS (textured) ----
+        if (ringShader && ringShader->linkedOk && texRing)
+        {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glDepthMask(GL_TRUE);
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, texRing);
+
+            ringShader->Use();
+            ringShader->SetInt("uRingTex", 0);
+
+            rings.Draw(
+                *ringShader,
+                view, proj,
+                camera,
+                sunDir, sunCol,
+                cfg.fogEnabled,
+                cfg.fogColor,
+                fogDensity,
+                night
+            );
+
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glDepthMask(GL_TRUE);
+            glDisable(GL_BLEND);
+        }
+
+  
+  // ---- TREES (instanced) ----
+        for (auto& isl : islands)
+        {
+            glm::vec3 lhPosWS(0.0f, -99999.0f, 0.0f);
+            float lhIntensity = 0.0f;
+
+            if (isl.hasLighthouse)
+            {
+                lhPosWS = isl.lighthousePosWS
+                    + glm::vec3(0.0f, cfg.lighthouseLanternHeight * cfg.lighthouseScale, 0.0f);
+                lhIntensity = lightVis * cfg.lighthouseLightStrength;
+            }
+
             if (treeModelLoaded)
             {
                 treeShader->Use();
@@ -2341,215 +2837,51 @@ private:
                 treeShader->SetFloat("uBeamInnerCos", innerCos);
                 treeShader->SetFloat("uBeamOuterCos", outerCos);
 
+
+                glEnable(GL_DEPTH_TEST);
+                glDepthMask(GL_TRUE);
+
+               
+                glDisable(GL_BLEND);
+
+             
+                glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+
                 isl.trees.DrawInstanced(treeModel.mesh.indexCount);
-            }
 
-            // Draw lighthouse model
-            if (lighthouseLoaded && isl.hasLighthouse)
-            {
-                lighthouseShader->Use();
-                lighthouseShader->SetMat4("uModel", glm::value_ptr(isl.lighthouseModel));
-                lighthouseShader->SetMat4("uView", glm::value_ptr(view));
-                lighthouseShader->SetMat4("uProj", glm::value_ptr(proj));
-
-                lighthouseShader->SetVec3("uViewPos", camera.pos.x, camera.pos.y, camera.pos.z);
-
-                lighthouseShader->SetVec3("uLightDir", sunDir.x, sunDir.y, sunDir.z);
-                lighthouseShader->SetVec3("uLightColor", sunCol.x, sunCol.y, sunCol.z);
-
-                lighthouseShader->SetFloat("uAmbientStrength", 0.22f);
-                lighthouseShader->SetFloat("uSpecStrength", 0.35f);
-                lighthouseShader->SetFloat("uShininess", 64.0f);
-
-                lighthouseShader->SetFloat("uFogEnabled", cfg.fogEnabled ? 1.0f : 0.0f);
-                lighthouseShader->SetVec3("uFogColor", cfg.fogColor.x, cfg.fogColor.y, cfg.fogColor.z);
-                lighthouseShader->SetFloat("uFogDensity", fogDensity);
-
-                lighthouseShader->SetFloat("uNightFactor", night);
-                lighthouseShader->SetVec3("uLanternPosWS", lhPosWS.x, lhPosWS.y, lhPosWS.z);
-                lighthouseShader->SetVec3("uLanternColor", lhCol.x, lhCol.y, lhCol.z);
-                lighthouseShader->SetFloat("uLanternIntensity", lhIntensity);
-
-                lighthouseModel.mesh.Bind();
-                glDrawElements(GL_TRIANGLES, lighthouseModel.mesh.indexCount, GL_UNSIGNED_INT, 0);
-                glBindVertexArray(0);
-
-            
-        //  Beam Draw
-                if (beamLoaded && beamShader && beamShader->linkedOk && (beamVis > 0.02f))
-
-                {
-                    const float CONE_H = 10.0f;  // MUST match BuildConeModel height
-                    const float CONE_R = 6.0f;   // MUST match BuildConeModel radius
-                    glm::vec3 dir = beamDir; 
-
-
-                    glm::vec3 beamStartWS = lhPosWS + glm::vec3(0.0f, -10.5f, 0.0f);
-
-
-
-                    float scaleY = cfg.lighthouseBeamLength / CONE_H;
-                    float scaleXZ = cfg.lighthouseBeamRadius / CONE_R;
-                   
-                    glm::mat4 BM(1.0f);
-
-                    // Translate to lantern
-                    BM = glm::translate(BM, beamStartWS);
-
-                 
-                    BM = BM * AimMatrixFromDirY(dir);
-
-                    // Scale cone after aiming
-                    BM = BM * glm::scale(glm::mat4(1.0f), glm::vec3(scaleXZ, scaleY, scaleXZ));
-
-
-
-                  
-
-                    //  debug print 
-                    static float beamDbgAccum = 0.0f;
-                    beamDbgAccum += dt;
-                    if (beamDbgAccum > 1.0f)
-                    {
-                        beamDbgAccum = 0.0f;
-                        std::cout << "[BEAM] dbg=" << (forceBeamDebug ? 1 : 0)
-                            << " night=" << night
-                            << " tod=" << tod.t01
-                            << " lhPos=(" << lhPosWS.x << "," << lhPosWS.y << "," << lhPosWS.z << ")"
-                            << " dir=(" << dir.x << "," << dir.y << "," << dir.z << ")"
-                            << " start=(" << beamStartWS.x << "," << beamStartWS.y << "," << beamStartWS.z << ")"
-                            << " scaleXZ=" << scaleXZ << " scaleY=" << scaleY
-                            << " vao=" << beamModel.mesh.vao
-                            << " vbo=" << beamModel.mesh.vbo
-                            << " ebo=" << beamModel.mesh.ebo
-                            << " idx=" << beamModel.mesh.indexCount
-                            << "\n";
-                    }
-
-                    glDisable(GL_CULL_FACE);
-                    glDepthMask(GL_FALSE);
-                    glEnable(GL_BLEND);
-
-                    if (forceBeamWire)
-                    {
-                        // Always visible wireframe cone
-                        glDisable(GL_DEPTH_TEST);          
-                        glBlendFunc(GL_ONE, GL_ONE);      
-                        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-                    }
-                    else if (forceBeamDebug)
-                    {
-                        glDisable(GL_DEPTH_TEST);
-                        glBlendFunc(GL_ONE, GL_ONE);
-                        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-                    }
-                    else
-                    {
-                        glEnable(GL_DEPTH_TEST);
-                        glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-                        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-                    }
-
-
-                    beamShader->Use();
-                    beamShader->SetMat4("uModel", glm::value_ptr(BM));
-                    beamShader->SetMat4("uView", glm::value_ptr(view));
-                    beamShader->SetMat4("uProj", glm::value_ptr(proj));
-                    beamShader->SetVec3("uViewPos", camera.pos.x, camera.pos.y, camera.pos.z);
-                    beamShader->SetFloat("uDebugWire", forceBeamWire ? 1.0f : 0.0f);
-
-                    if (forceBeamWire)
-                    {
-                        beamShader->SetVec3("uBeamColor", 0.0f, 1.0f, 0.0f); // bright green to make it easy to see
-                        beamShader->SetFloat("uBeamStrength", 50.0f);
-                        beamShader->SetFloat("uFogEnabled", 0.0f);
-                    }
-                    else if (forceBeamDebug)
-                    {
-                        beamShader->SetVec3("uBeamColor", 1.0f, 1.0f, 1.0f);
-                        beamShader->SetFloat("uBeamStrength", 10.0f);
-                        beamShader->SetFloat("uFogEnabled", 0.0f);
-                    }
-                    else
-                    {
-                        beamShader->SetVec3("uBeamColor", lhCol.x, lhCol.y, lhCol.z);
-                        beamShader->SetFloat("uBeamStrength", cfg.lighthouseBeamStrength * beamVis);
-                        beamShader->SetFloat("uFogEnabled", cfg.fogEnabled ? 1.0f : 0.0f);
-                    }
-
-
-                    beamShader->SetVec3("uFogColor", cfg.fogColor.x, cfg.fogColor.y, cfg.fogColor.z);
-                    beamShader->SetFloat("uFogDensity", fogDensity);
-
-                    beamModel.mesh.Bind();
-                    glDrawElements(GL_TRIANGLES, beamModel.mesh.indexCount, GL_UNSIGNED_INT, 0);
-                    glBindVertexArray(0);
-
-                    //  Restore 
-                    glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
-                    glDisable(GL_BLEND);
-                    glDepthMask(GL_TRUE);
-                    glEnable(GL_DEPTH_TEST);
-                }
-
-
+                glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
 
             }
-
-            // -------------------- Draw village houses --------------------
-            if (housesLoaded && !isl.houses.empty())
-            {
-                glDisable(GL_CULL_FACE); // <--- TEST: fixes missing walls if it's culling
-                // glEnable(GL_CULL_FACE); glCullFace(GL_BACK); // restore after if you want
-
-                Shader& hs = *lighthouseShader;
-                hs.Use();
-                hs.SetMat4("uView", glm::value_ptr(view));
-                hs.SetMat4("uProj", glm::value_ptr(proj));
-                hs.SetVec3("uViewPos", camera.pos.x, camera.pos.y, camera.pos.z);
-
-                hs.SetVec3("uLightDir", sunDir.x, sunDir.y, sunDir.z);
-                hs.SetVec3("uLightColor", sunCol.x, sunCol.y, sunCol.z);
-
-                hs.SetFloat("uAmbientStrength", 0.22f);
-                hs.SetFloat("uSpecStrength", 0.25f);
-                hs.SetFloat("uShininess", 48.0f);
-
-                hs.SetFloat("uFogEnabled", cfg.fogEnabled ? 1.0f : 0.0f);
-                hs.SetVec3("uFogColor", cfg.fogColor.x, cfg.fogColor.y, cfg.fogColor.z);
-                hs.SetFloat("uFogDensity", fogDensity);
-
-                // If your lighthouse.frag expects these, keep them valid:
-                hs.SetFloat("uNightFactor", night);
-                hs.SetVec3("uLanternPosWS", lhPosWS.x, lhPosWS.y, lhPosWS.z);
-                hs.SetVec3("uLanternColor", lhCol.x, lhCol.y, lhCol.z);
-                hs.SetFloat("uLanternIntensity", lhIntensity);
-
-                for (const auto& h : isl.houses)
-                {
-                    int vi = (h.variant >= 0 && h.variant < (int)houseModels.size()) ? h.variant : 0;
-                    hs.SetMat4("uModel", glm::value_ptr(h.model));
-
-                    houseModels[vi].mesh.Bind();
-                    glDrawElements(GL_TRIANGLES, houseModels[vi].mesh.indexCount, GL_UNSIGNED_INT, 0);
-                    glBindVertexArray(0);
-                }
-
-                glEnable(GL_CULL_FACE); // restore if your project uses it elsewhere
-            
-            
-            }
-
-
         }
-         
-        water.Draw(*waterShader, model, view, proj, camera, sunDir, sunCol,
-            timeSeconds, waveStrength, cfg.waveSpeed,
-            cfg.fogEnabled, cfg.fogColor, fogDensity,
-            waterLhPosWS, lhCol, waterLhIntensity,
-            beamDir, innerCos, outerCos);
 
+        // ---- HELP OVERLAY ----
+        if (showHelp && hudShader && hudShader->linkedOk && texHelp)
+        {
+            glDisable(GL_DEPTH_TEST);
+            glDepthMask(GL_FALSE);
+
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+            hudShader->Use();
+            hudShader->SetInt("uTex", 0);
+            hudShader->SetFloat("uAlpha", 0.92f);
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, texHelp);
+
+            glBindVertexArray(hudVAO);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+            glBindVertexArray(0);
+
+            glBindTexture(GL_TEXTURE_2D, 0);
+
+            glDisable(GL_BLEND);
+            glDepthMask(GL_TRUE);
+            glEnable(GL_DEPTH_TEST);
+        }
     }
+
 };
  
     int main()

@@ -9,16 +9,18 @@ out vec4 FragColor;
 uniform vec3 uViewPos;
 uniform vec3 uLightDir;
 uniform vec3 uLightColor;
+
 uniform vec3  uPointLightPos;
 uniform vec3  uPointLightColor;
 uniform float uPointLightIntensity;
-uniform vec3  uBeamDir;       
-uniform float uBeamInnerCos; 
-uniform float uBeamOuterCos; 
+
+uniform vec3  uBeamDir;
+uniform float uBeamInnerCos;
+uniform float uBeamOuterCos;
+
 uniform float uAmbientStrength;
 uniform float uSpecStrength;
 uniform float uShininess;
-
 
 uniform float uFogEnabled;
 uniform vec3  uFogColor;
@@ -34,67 +36,76 @@ void main()
     vec3 albedo = (vHeight01 < uTrunkFrac) ? barkCol : leafCol;
 
     vec3 N = normalize(vNormalWS);
-    vec3 L = normalize(-uLightDir);
+    vec3 V = normalize(uViewPos - vPosWS);
 
+    // -------------------------
+    // Sun / directional light
+    // -------------------------
+    vec3 L = normalize(-uLightDir);
     float diff = max(dot(N, L), 0.0);
 
-    vec3 V = normalize(uViewPos - vPosWS);
     vec3 R = reflect(-L, N);
     float spec = pow(max(dot(V, R), 0.0), uShininess);
 
-    vec3 ambient = uAmbientStrength * albedo;
-    vec3 diffuse = diff * albedo * uLightColor;
+    vec3 ambient  = uAmbientStrength * albedo;
+    vec3 diffuse  = diff * albedo * uLightColor;
     vec3 specular = uSpecStrength * spec * uLightColor;
 
     vec3 color = ambient + diffuse + specular;
 
-    // ------------------------------------------------------------
-    // Lighthouse point light (Blinn-Phong point light)
-    // ------------------------------------------------------------
+    // -------------------------
+    // Lighthouse point light + spotlight mask
+    // -------------------------
     vec3 LpVec = uPointLightPos - vPosWS;
     float distP = length(LpVec);
-
     vec3 Lp = (distP > 0.0001) ? (LpVec / distP) : vec3(0.0, 1.0, 0.0);
 
     float atten = 1.0 / (1.0 + 0.05 * distP + 0.005 * distP * distP);
-
     float diffP = max(dot(N, Lp), 0.0);
 
-    // Blinn-Phong spec for point light (keep your style consistent)
     vec3 Hp = normalize(Lp + V);
     float specP = pow(max(dot(N, Hp), 0.0), uShininess);
 
     vec3 pointDiffuse  = diffP * albedo * uPointLightColor;
     vec3 pointSpecular = uSpecStrength * specP * uPointLightColor;
 
-vec3 pointLight = (pointDiffuse + pointSpecular) * atten * uPointLightIntensity;
+    vec3 pointLight = (pointDiffuse + pointSpecular) * atten * uPointLightIntensity;
 
-// ---- Spotlight cone mask ----
-// Direction FROM light TO fragment:
-vec3 lightToFrag = normalize(vPosWS - uPointLightPos);
+    // beam cone mask
+    vec3 lightToFrag = normalize(vPosWS - uPointLightPos);
+    float cosAng = dot(lightToFrag, normalize(uBeamDir));
+    float spot = smoothstep(uBeamOuterCos, uBeamInnerCos, cosAng);
 
-// 1 = aligned with beam axis, 0 = 90 degrees off
-float cosAng = dot(lightToFrag, normalize(uBeamDir));
+    float beamAtten = 1.0 / (1.0 + 0.08 * distP + 0.01 * distP * distP);
+    float lantern = 0.08;
 
-// 0 outside cone, 1 near center (soft edge)
-float spot = smoothstep(uBeamOuterCos, uBeamInnerCos, cosAng);
+    color += pointLight * (lantern + spot * beamAtten);
 
-// Extra distance shaping so it doesn’t "wash" everything
-float beamAtten = 1.0 / (1.0 + 0.08 * distP + 0.01 * distP * distP);
+    // -------------------------
+    // Fog + alpha fade
+    // -------------------------
+   if (uFogEnabled > 0.5)
+{
+    float d = length(uViewPos - vPosWS);
 
-// Tiny “lantern” glow only (prevents the block look)
-float lantern = 0.08; // tweak 0.03..0.15
+    // fog visibility (same curve you already use)
+    float f = exp(-(uFogDensity * d) * (uFogDensity * d));
+    f = clamp(f, 0.0, 1.0);
 
-color += pointLight * (lantern + spot * beamAtten);
+    // fog color mix
+    color = mix(uFogColor, color, f);
 
+    // ---- distance fade range (tune these) ----
+    const float fadeStart = 220.0; // start fading further away
+    const float fadeEnd   = 520.0; // fully gone even further away
 
-    if (uFogEnabled > 0.5)
-    {
-        float dist = length(uViewPos - vPosWS);
-        float fogFactor = exp(-uFogDensity * dist);
-        fogFactor = clamp(fogFactor, 0.0, 1.0);
-        color = mix(uFogColor, color, fogFactor);
-    }
+    float fadeT = smoothstep(fadeEnd, fadeStart, d); // 1 near, 0 far
 
-    FragColor = vec4(color, 1.0);
+    // dither noise
+    float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233))) * 43758.5453);
+
+    if (n > fadeT) discard;
+}
+
+FragColor = vec4(color, 1.0);
 }

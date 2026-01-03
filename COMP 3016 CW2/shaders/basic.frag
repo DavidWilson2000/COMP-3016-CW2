@@ -5,6 +5,7 @@ in VS_OUT {
     vec3 normal;
     float moisture;
     float height;
+    vec2 uv;           
 } fs_in;
 
 out vec4 FragColor;
@@ -20,7 +21,7 @@ uniform float uPointLightIntensity;
 uniform vec3  uBeamDir;
 uniform float uBeamInnerCos;
 uniform float uBeamOuterCos;
-
+uniform float uBeamRange;
 uniform float uAmbientStrength;
 uniform float uSpecStrength;
 uniform float uShininess;
@@ -36,8 +37,17 @@ uniform float uFogDensity;
 uniform float uIslandBiome;
 uniform float uIslandSeed;
 
-// -------------------- your noise helpers --------------------
+// Terrain textures
+uniform sampler2D uTexSand;
+uniform sampler2D uTexGrass;
+uniform sampler2D uTexRock;
+uniform sampler2D uTexSnow;
+
+uniform float uTexTiling;
+uniform float uUseTextures;
+
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+
 float noise2f(vec2 p)
 {
     vec2 i = floor(p);
@@ -51,6 +61,7 @@ float noise2f(vec2 p)
     vec2 u = f * f * (3.0 - 2.0 * f);
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
+
 float fbm2f(vec2 p)
 {
     float sum = 0.0;
@@ -65,12 +76,46 @@ float fbm2f(vec2 p)
     return sum;
 }
 
-// float-safe biome equality mask
 float biomeIs(float id) { return 1.0 - step(0.5, abs(uIslandBiome - id)); }
 
-// ------------------------------------------------------------
-// Biome shading (UNCHANGED from your version, pasted as-is)
-// ------------------------------------------------------------
+vec3 SampleTerrainTextures(vec2 uv, float h, float m, float slope)
+{
+    vec2 tuv = uv * uTexTiling;
+
+    vec3 sand  = texture(uTexSand,  tuv).rgb;
+    vec3 grass = texture(uTexGrass, tuv).rgb;
+    vec3 rock  = texture(uTexRock,  tuv).rgb;
+    vec3 snow  = texture(uTexSnow,  tuv).rgb;
+
+    float beachBand = uSeaLevel + 0.25;
+    float rockBand  = uSeaLevel + 5.0;
+    float snowBand  = uSeaLevel + 7.0;
+
+    float wSand = 1.0 - smoothstep(beachBand, beachBand + 0.75, h);
+    float wSnow = smoothstep(snowBand - 0.7, snowBand + 0.9, h);
+    float wRock = smoothstep(0.25, 0.70, slope);
+
+    float grassMoist = smoothstep(0.35, 0.75, m);
+    float wGrass = grassMoist * (1.0 - wSnow) * (1.0 - wRock);
+
+    wSand *= (1.0 - wSnow) * (1.0 - wRock);
+    float wBase = max(0.0, 1.0 - (wSand + wGrass + wRock + wSnow));
+
+    vec3 base = grass;
+
+    vec3 col =
+        sand  * wSand +
+        grass * wGrass +
+        rock  * wRock +
+        snow  * wSnow +
+        base  * wBase;
+
+    float highRock = smoothstep(rockBand, snowBand, h);
+    col = mix(col, rock, highRock * 0.15);
+
+    return col;
+}
+
 vec3 biomeColor(float h, float m, float slope)
 {
     float isF = biomeIs(0.0);
@@ -163,6 +208,7 @@ vec3 biomeColor(float h, float m, float slope)
     if (isS > 0.5 && h > snowBand)
         land = snow;
 
+    // extra detailing kept as-is
     if (isF > 0.5)
     {
         float canopy = fbm2f(fs_in.worldPos.xz * 0.03);
@@ -207,20 +253,16 @@ vec3 biomeColor(float h, float m, float slope)
     return land;
 }
 
-// -------------------- NEW: helper for point + spotlight --------------------
 vec3 ApplyPointAndBeam(vec3 baseCol, vec3 N, vec3 V)
 {
-    // Vector from fragment -> light (for N·L)
     vec3 toLight = uPointLightPos - fs_in.worldPos;
     float dist = length(toLight);
     if (dist < 0.0001) return vec3(0.0);
 
     vec3 Lp = toLight / dist;
 
-    // World scale friendly attenuation (stronger / longer reach)
     float atten = 1.0 / (1.0 + 0.015 * dist + 0.0006 * dist * dist);
 
-    // Basic point light diffuse + spec
     float diffP = max(dot(N, Lp), 0.0);
     vec3 Hp = normalize(Lp + V);
     float specP = pow(max(dot(N, Hp), 0.0), uShininess);
@@ -228,15 +270,12 @@ vec3 ApplyPointAndBeam(vec3 baseCol, vec3 N, vec3 V)
     vec3 point = (diffP * baseCol + (uSpecStrength * specP) * vec3(1.0)) * uPointLightColor;
     point *= atten * uPointLightIntensity;
 
-    // Spotlight mask:
-    // Compare direction FROM LIGHT to fragment with beam direction.
     vec3 lightToFrag = normalize(fs_in.worldPos - uPointLightPos);
     float cosAng = dot(lightToFrag, normalize(uBeamDir));
     float spot = smoothstep(uBeamOuterCos, uBeamInnerCos, cosAng);
 
-    // Keep a small lantern glow always, then boost inside cone.
-    float lantern = 0.20;          // always-on base
-    float beamBoost = 1.50;        // extra inside cone
+    float lantern = 0.20;
+    float beamBoost = 1.50;
 
     return point * (lantern + beamBoost * spot);
 }
@@ -248,14 +287,19 @@ void main()
     vec3 L = normalize(-uLightDir);
 
     float slope = 1.0 - clamp(N.y, 0.0, 1.0);
+
     vec3 baseCol = biomeColor(fs_in.height, fs_in.moisture, slope);
 
-    // Per-island tint
+    if (uUseTextures > 0.5)
+    {
+        vec3 texCol = SampleTerrainTextures(fs_in.uv, fs_in.height, fs_in.moisture, slope);
+        baseCol = texCol * baseCol;
+    }
+
     float islandRand = hash(vec2(uIslandSeed, uIslandSeed * 0.37));
     vec3 tint = mix(vec3(0.96, 0.98, 1.02), vec3(1.04, 0.98, 0.96), islandRand);
     baseCol *= tint;
 
-    // Micro-variation
     float isS = biomeIs(2.0);
     float isD = biomeIs(3.0);
     vec2 islandUV = fs_in.worldPos.xz + vec2(uIslandSeed * 0.013, uIslandSeed * 0.017);
@@ -273,7 +317,6 @@ void main()
 
     baseCol *= mix(1.0 - amp, 1.0 + amp, v);
 
-    // Sun lighting
     vec3 ambient = uAmbientStrength * baseCol;
 
     float diff = max(dot(N, L), 0.0);
@@ -285,11 +328,9 @@ void main()
 
     vec3 color = ambient + diffuse + specular;
 
-    // Lighthouse point + beam (this is what you want working)
     if (uPointLightIntensity > 0.001)
         color += ApplyPointAndBeam(baseCol, N, V);
 
-    // Fog
     if (uFogEnabled > 0.5)
     {
         float d = length(uViewPos - fs_in.worldPos);
@@ -298,7 +339,6 @@ void main()
         color = mix(uFogColor, color, fogFactor);
     }
 
-    // Gamma
     color = pow(color, vec3(1.0 / 2.2));
     FragColor = vec4(color, 1.0);
 }
