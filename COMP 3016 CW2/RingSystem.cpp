@@ -1,7 +1,6 @@
 #include "RingSystem.h"
-#include "Shader.h"  
-
-class Camera { public: glm::vec3 pos; };
+#include "Shader.h" 
+#include "Camera.h"
 
                      static void BuildTorus(std::vector<RingVertex>& outV,
                          std::vector<unsigned int>& outI,

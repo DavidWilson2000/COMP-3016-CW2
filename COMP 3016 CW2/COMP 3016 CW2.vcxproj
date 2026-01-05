@@ -199,15 +199,22 @@ xcopy /Y /D "$(SolutionDir)OpenGL\lib\irrKlang.dll" "$(TargetDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="AudioSystem.cpp" />
     <ClCompile Include="loadpng.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="RingSystem.cpp" />
     <ClCompile Include="Shader.cpp" />
+    <ClCompile Include="World.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="AudioSystem.h" />
+    <ClInclude Include="Camera.h" />
+    <ClInclude Include="DayNight.h" />
     <ClInclude Include="loadpng.h" />
     <ClInclude Include="RingSystem.h" />
     <ClInclude Include="Shader.h" />
+    <ClInclude Include="World.h" />
+    <ClInclude Include="WorldTypes.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

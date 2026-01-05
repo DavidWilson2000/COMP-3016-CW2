@@ -6,9 +6,9 @@
 #include <glm/glm/gtc/constants.hpp>
 
 #include <GL/glew.h>
+#include "Shader.h"
+#include "Camera.h"
 
-class Shader;
-class Camera;
 
 // Minimal vertex for ring mesh (pos + normal)
 struct RingVertex
