@@ -27,9 +27,6 @@
     <ClCompile Include="Shader.cpp">
       <Filter>Resource Files\shaders</Filter>
     </ClCompile>
-    <ClCompile Include="loadpng.cpp">
-      <Filter>Source Files\Models</Filter>
-    </ClCompile>
     <ClCompile Include="RingSystem.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -43,9 +40,6 @@
   <ItemGroup>
     <ClInclude Include="Shader.h">
       <Filter>Resource Files\shaders</Filter>
-    </ClInclude>
-    <ClInclude Include="loadpng.h">
-      <Filter>Source Files\Models</Filter>
     </ClInclude>
     <ClInclude Include="RingSystem.h">
       <Filter>Source Files</Filter>

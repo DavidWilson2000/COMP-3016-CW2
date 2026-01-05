@@ -92,7 +92,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)OpenGL\lib;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)OpenGL\include</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
@@ -102,8 +102,17 @@
       <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib;</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
-      <Command>
-      </Command>
+      <Command>echo Copying runtime DLLs...
+
+copy /Y "$(SolutionDir)OpenGL\lib\glfw3.dll"        "$(TargetDir)"
+copy /Y "$(SolutionDir)OpenGL\lib\glew32.dll"        "$(TargetDir)"
+copy /Y "$(SolutionDir)OpenGL\lib\irrKlang.dll"      "$(TargetDir)"
+copy /Y "$(SolutionDir)OpenGL\lib\assimp-vc143-mt.dll" "$(TargetDir)"
+
+xcopy /E /I /Y "$(ProjectDir)shaders"  "$(TargetDir)shaders"
+xcopy /E /I /Y "$(ProjectDir)assets" "$(TargetDir)assets"
+
+</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -114,7 +123,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)OpenGL\lib;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)OpenGL\include</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
@@ -126,8 +135,17 @@
       <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib;</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
-      <Command>
-      </Command>
+      <Command>echo Copying runtime DLLs...
+
+copy /Y "$(SolutionDir)OpenGL\lib\glfw3.dll"        "$(TargetDir)"
+copy /Y "$(SolutionDir)OpenGL\lib\glew32.dll"        "$(TargetDir)"
+copy /Y "$(SolutionDir)OpenGL\lib\irrKlang.dll"      "$(TargetDir)"
+copy /Y "$(SolutionDir)OpenGL\lib\assimp-vc143-mt.dll" "$(TargetDir)"
+
+xcopy /E /I /Y "$(ProjectDir)shaders"  "$(TargetDir)shaders"
+xcopy /E /I /Y "$(ProjectDir)assets" "$(TargetDir)assets"
+
+</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -136,7 +154,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)OpenGL\lib;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)OpenGL\include</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
@@ -146,8 +164,17 @@
       <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib;</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
-      <Command>
-      </Command>
+      <Command>echo Copying runtime DLLs...
+
+copy /Y "$(SolutionDir)OpenGL\lib\glfw3.dll"        "$(TargetDir)"
+copy /Y "$(SolutionDir)OpenGL\lib\glew32.dll"        "$(TargetDir)"
+copy /Y "$(SolutionDir)OpenGL\lib\irrKlang.dll"      "$(TargetDir)"
+copy /Y "$(SolutionDir)OpenGL\lib\assimp-vc143-mt.dll" "$(TargetDir)"
+
+xcopy /E /I /Y "$(ProjectDir)shaders"  "$(TargetDir)shaders"
+xcopy /E /I /Y "$(ProjectDir)assets" "$(TargetDir)assets"
+
+</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -158,7 +185,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)OpenGL\lib;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)OpenGL\include</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
@@ -170,8 +197,17 @@
       <AdditionalLibraryDirectories>$(SolutionDir)OpenGL\lib;</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
-      <Command>
-      </Command>
+      <Command>echo Copying runtime DLLs...
+
+copy /Y "$(SolutionDir)OpenGL\lib\glfw3.dll"        "$(TargetDir)"
+copy /Y "$(SolutionDir)OpenGL\lib\glew32.dll"        "$(TargetDir)"
+copy /Y "$(SolutionDir)OpenGL\lib\irrKlang.dll"      "$(TargetDir)"
+copy /Y "$(SolutionDir)OpenGL\lib\assimp-vc143-mt.dll" "$(TargetDir)"
+
+xcopy /E /I /Y "$(ProjectDir)shaders"  "$(TargetDir)shaders"
+xcopy /E /I /Y "$(ProjectDir)assets" "$(TargetDir)assets"
+
+</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
