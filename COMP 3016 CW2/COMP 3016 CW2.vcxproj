@@ -200,7 +200,6 @@ xcopy /Y /D "$(SolutionDir)OpenGL\lib\irrKlang.dll" "$(TargetDir)"</Command>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="AudioSystem.cpp" />
-    <ClCompile Include="loadpng.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="RingSystem.cpp" />
     <ClCompile Include="Shader.cpp" />
@@ -210,7 +209,6 @@ xcopy /Y /D "$(SolutionDir)OpenGL\lib\irrKlang.dll" "$(TargetDir)"</Command>
     <ClInclude Include="AudioSystem.h" />
     <ClInclude Include="Camera.h" />
     <ClInclude Include="DayNight.h" />
-    <ClInclude Include="loadpng.h" />
     <ClInclude Include="RingSystem.h" />
     <ClInclude Include="Shader.h" />
     <ClInclude Include="World.h" />

@@ -30,7 +30,7 @@
 #include <glm/glm/gtc/constants.hpp>
 
 
-// -------------------- ERROR / LOG HELPERS --------------------
+//  error and log helpers
 static void LogInfo(const std::string& m) { std::cout << "[INFO] " << m << "\n"; }
 static void LogWarn(const std::string& m) { std::cout << "[WARN] " << m << "\n"; }
 static void LogError(const std::string& m) { std::cerr << "[ERROR] " << m << "\n"; }
