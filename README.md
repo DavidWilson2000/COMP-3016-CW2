@@ -3,7 +3,7 @@ David Wilson - 10781607
 
 GitHub Repository: https://github.com/DavidWilson2000/COMP-3016-CW2
 
-Video Showcase:
+Video Showcase: https://youtu.be/9S31Idl_vD4
 
 Project Overview
 
