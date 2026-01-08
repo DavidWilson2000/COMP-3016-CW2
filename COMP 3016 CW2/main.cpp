@@ -104,7 +104,18 @@ static void APIENTRY GLDebugCallback(
 
 
 
-
+static void PrintAuthorSignature()
+{
+    std::cout
+        << "\n--- COMP-3016 CW2 Signature ---\n"
+        << "Author: David Wilson (10781607)\n"
+        << "Custom systems implemented in this build:\n"
+        << " - TimeOfDaySystem + NightFactor (sun dir/colour cycle)\n"
+        << " - Throttled GL error checks + KHR_debug callback\n"
+        << " - Minimal OBJ loader with index remap + quad triangulation\n"
+        << " - Procedural village placement with spacing/slope constraints\n"
+        << "-------------------------------\n\n";
+}
 
 
 
@@ -885,6 +896,8 @@ public:
             std::cerr << "Tree palette texture failed to create.\n";
 
         std::cout << "CWD = " << std::filesystem::current_path() << "\n";
+
+        PrintAuthorSignature();
 
         //  Load tree OBJ + compute pivot 
         {
